@@ -1,0 +1,130 @@
+function Footer() {
+	const infoColumns = [
+		{
+			title: 'HE THONG NHA THUOC',
+			items: ['He thong 414 nha thuoc', 'Noi quy nha thuoc', 'Chat luong phuc vu'],
+		},
+		{
+			title: 'HO TRO KHACH HANG',
+			items: [
+				'Dieu kien giao dich chung',
+				'Huong dan mua hang online',
+				'Chinh sach giao hang',
+				'Chinh sach thanh toan',
+				'Chinh sach doi tra, bao hanh',
+				'Tich diem Qua tang VIP',
+			],
+		},
+		{
+			title: 'VE NHA THUOC AN KHANG',
+			items: ['Gioi thieu cong ty', 'Ban Dieu hanh', 'Chinh sach xu ly du lieu ca nhan', 'Chinh sach cookies'],
+		},
+		{
+			title: 'BENH VIEN',
+			items: ['Tat ca benh vien'],
+		},
+	]
+
+	const highlights = [
+		{ title: 'CAM KET 100%', desc: 'Thuoc chinh hang', symbol: 'CK' },
+		{ title: 'MIEN PHI GIAO HANG', desc: 'Don hang tu 150.000d', symbol: 'GH' },
+		{ title: 'GIAO NHANH 2 GIO', desc: 'Xem chi tiet', symbol: '2H' },
+		{ title: 'DOI TRA TRONG 30 NGAY', desc: 'Xem chi tiet', symbol: 'DT' },
+	]
+
+	return (
+		<footer className="mt-8 bg-white text-[14px] text-slate-700">
+			<section className="bg-[#e8f3e7]">
+				<div className="relative mx-auto max-w-[1200px] overflow-hidden px-4 py-8 lg:px-16 lg:py-9">
+					<div className="grid grid-cols-1 gap-y-6 md:grid-cols-2 md:gap-x-8 md:pr-[330px]">
+						{highlights.map((item) => (
+							<div key={item.title} className="flex items-center gap-4">
+								<div className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-[#35b548] text-xs font-bold text-white">
+									{item.symbol}
+								</div>
+								<div className="flex flex-col gap-1">
+									<h4 className="text-[16px] font-semibold uppercase text-slate-800">{item.title}</h4>
+									<p className="text-[15px] text-slate-600">{item.desc}</p>
+								</div>
+							</div>
+						))}
+					</div>
+
+					<img
+						src="https://cdnv2.tgdd.vn/webmwg/production-fe/ankhang/public/static/images/bg_footer.png"
+						alt="footer"
+						className="pointer-events-none absolute -right-2 bottom-0 hidden h-[248px] w-[446px] object-cover lg:block"
+					/>
+				</div>
+			</section>
+
+			<section className="mx-auto max-w-[1200px] px-4 lg:px-0">
+				<div className="grid grid-cols-1 gap-4 border-b border-slate-200 py-6 md:grid-cols-[260px_repeat(4,1fr)] md:gap-3">
+					<div>
+						<h4 className="mb-4 text-[16px] font-semibold uppercase text-slate-800">TONG DAI</h4>
+						<p className="font-semibold leading-7">
+							Goi mua: <span className="text-[#1e6fd9]">1900 1572</span>
+							<span className="block font-medium text-slate-600">(8:00 - 21:30)</span>
+						</p>
+						<p className="font-semibold leading-7">
+							Khieu nai: <span className="text-[#1e6fd9]">1900 1275</span>
+							<span className="block font-medium text-slate-600">(8:00 - 21:30)</span>
+						</p>
+					</div>
+
+					{infoColumns.map((column) => (
+						<div key={column.title}>
+							<h4 className="mb-4 text-[16px] font-semibold uppercase text-slate-800">{column.title}</h4>
+							<ul>
+								{column.items.map((item) => (
+									<li key={item} className="leading-7 text-slate-700">
+										{item}
+									</li>
+								))}
+							</ul>
+						</div>
+					))}
+
+					<div>
+						<h4 className="mb-4 text-[16px] font-semibold uppercase text-slate-800">KET NOI VOI CHUNG TOI</h4>
+						<div className="flex items-center gap-3">
+							<span className="grid h-7 min-w-7 place-items-center rounded bg-[#2579ff] px-2 text-xs font-bold text-white">Zalo</span>
+							<span className="grid h-7 w-7 place-items-center rounded bg-[#1877f2] text-xs font-bold text-white">f</span>
+							<span className="grid h-7 w-7 place-items-center rounded bg-[#ff0000] text-xs font-bold text-white">YT</span>
+						</div>
+					</div>
+
+					<div>
+						<h4 className="mb-4 text-[16px] font-semibold uppercase text-slate-800">CHUNG NHAN BOI</h4>
+						<div className="flex items-center gap-3">
+							<span className="rounded border border-[#3aa0ff] px-2 py-1 text-[11px] font-semibold text-[#1877f2]">DA THONG BAO</span>
+							<span className="rounded border border-[#4fbb5b] px-2 py-1 text-[11px] font-semibold text-[#1c8f2e]">DMCA</span>
+						</div>
+					</div>
+				</div>
+
+				<p className="py-4 text-[14px] leading-6 text-slate-600">
+					Cong Ty Co Phan Duoc Pham An Khang Pharma. GPDKKD: 0314587300 do so KH & DT TP.HCM cap ngay
+					21/08/2017. Tru so chinh: 128, Tran Quang Khai, P.Tan Dinh, TP.HCM. Giay phep thiet lap trang
+					thong tin dien tu tong hop so 03/GP-STTTT ngay 21/02/2023 cap boi So Thong Tin va Truyen Thong
+					TP.HCM. Dia chi lien he va gui chung tu: Lo T2-1.2, Duong D1, P.Tang Nhon Phu, TP.HCM. Email:
+					cskh@nhathuocankhang.com. Chiu trach nhiem noi dung: Huynh Van Tot.
+				</p>
+
+				<div className="pb-6 text-center">
+					<p className="mb-3 text-sm text-slate-600">Ghe tham cac website khac cung tap doan MWG</p>
+					<div className="flex flex-wrap items-center justify-center gap-2">
+						<span className="rounded-md bg-black px-3 py-1.5 text-xs font-semibold text-yellow-300">thegioididong</span>
+						<span className="rounded-md bg-[#0a8f43] px-3 py-1.5 text-xs font-semibold text-white">dienmayxanh</span>
+						<span className="rounded-md bg-[#111827] px-3 py-1.5 text-xs font-semibold text-white">topzone</span>
+						<span className="rounded-md bg-[#e11d48] px-3 py-1.5 text-xs font-semibold text-white">avaKids</span>
+						<span className="rounded-md bg-[#15803d] px-3 py-1.5 text-xs font-semibold text-white">bachhoaxanh</span>
+						<span className="rounded-md bg-[#f59e0b] px-3 py-1.5 text-xs font-semibold text-blue-800">erablue</span>
+					</div>
+				</div>
+			</section>
+		</footer>
+	)
+}
+
+export default Footer
