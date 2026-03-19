@@ -117,7 +117,7 @@ function LoginAndRegister({ onClose, onAuthSuccess }: LoginAndRegisterProps) {
 				</button>
 
 				<div className="bg-[linear-gradient(120deg,#39b54a,#6adf7d)] px-6 pb-7 pt-8 text-white">
-					<p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/85">Nha thuoc An Khang</p>
+					<p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/85">NHA THUOC T&Q </p>
 					<h2 className="mt-3 text-3xl font-black leading-tight">
 						{isForgotMode ? 'Khoi phuc mat khau' : isRegisterMode ? 'Tao tai khoan moi' : 'Chao mung ban quay lai'}
 					</h2>

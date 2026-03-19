@@ -1,8 +1,8 @@
 function Footer() {
 	const infoColumns = [
 		{
-			title: 'HE THONG NHA THUOC',
-			items: ['He thong 414 nha thuoc', 'Noi quy nha thuoc', 'Chat luong phuc vu'],
+			title: 'HE THONG NHA THUOC T&Q',
+			items: ['He thong 414 NHA THUOC T&Q', 'Noi quy NHA THUOC T&Q', 'Chat luong phuc vu'],
 		},
 		{
 			title: 'HO TRO KHACH HANG',
@@ -16,7 +16,7 @@ function Footer() {
 			],
 		},
 		{
-			title: 'VE NHA THUOC AN KHANG',
+			title: 'VE NHA THUOC T&Q ',
 			items: ['Gioi thieu cong ty', 'Ban Dieu hanh', 'Chinh sach xu ly du lieu ca nhan', 'Chinh sach cookies'],
 		},
 		{
@@ -104,7 +104,7 @@ function Footer() {
 				</div>
 
 				<p className="py-4 text-[14px] leading-6 text-slate-600">
-					Cong Ty Co Phan Duoc Pham An Khang Pharma. GPDKKD: 0314587300 do so KH & DT TP.HCM cap ngay
+					Cong Ty Co Phan Duoc Pham  Pharma. GPDKKD: 0314587300 do so KH & DT TP.HCM cap ngay
 					21/08/2017. Tru so chinh: 128, Tran Quang Khai, P.Tan Dinh, TP.HCM. Giay phep thiet lap trang
 					thong tin dien tu tong hop so 03/GP-STTTT ngay 21/02/2023 cap boi So Thong Tin va Truyen Thong
 					TP.HCM. Dia chi lien he va gui chung tu: Lo T2-1.2, Duong D1, P.Tang Nhon Phu, TP.HCM. Email:

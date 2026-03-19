@@ -85,14 +85,15 @@ function Header({
 							<span className="ml-1 font-semibold">Ho Chi Minh</span>
 						</div>
 						<div className="text-sm">
-							<span className="text-white/95">📱 Tai app An Khang - Freeship moi don - Uu dai den 200.000d</span>
+							<span className="text-white/95">📱 Tai app  - Freeship moi don - Uu dai den 200.000d</span>
 						</div>
 					</div>
 
 					<div className="flex flex-wrap items-center gap-4 pb-4 pt-2">
 						<a href="/" className="flex h-10 w-[154px] items-center text-2xl font-black leading-none">
-							<span>NHA THUOC</span>
-							<span className="ml-1 text-[#dfffa1]">AN KHANG</span>
+							<span>Nhà Thuốc </span>
+							<span>T&Q</span>
+							<span className="ml-1 text-[#dfffa1]"></span>
 						</a>
 
 						<div className="relative flex h-10 min-w-[320px] flex-1 items-center rounded-xl bg-white pl-10 pr-10">

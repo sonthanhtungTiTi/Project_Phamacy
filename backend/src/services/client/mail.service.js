@@ -72,7 +72,7 @@ const sendResetOtpEmail = async ({ toEmail, fullName, otpCode }) => {
 	await transporter.sendMail({
 		from,
 		to: toEmail,
-		subject: 'OTP khoi phuc mat khau - Nha thuoc An Khang',
+		subject: 'OTP khoi phuc mat khau - NHA THUOC T&Q ',
 		text: [
 			`Xin chao ${fullName || 'ban'},`,
 			'',
