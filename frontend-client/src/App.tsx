@@ -2,13 +2,12 @@ import { useEffect, useState } from 'react'
 import HomePage from './pages/HomePage'
 import Category from './pages/Category'
 import ProductDetail from './pages/ProductDetail'
-import MuaThuocTuVan from './pages/MuaThuoc&TuVan'
-import TrangBaoSucKheo1 from './pages/TrangBaoSucKheo1'
-import TrangBaoSucKheo2 from './pages/TrangBaoSucKheo2'
-import TrangBaoSucKheo3 from './pages/TrangBaoSucKheo3'
-import TrangBaoSucKheo4 from './pages/TrangBaoSucKheo4'
-import TrangBaoSucKheo5 from './pages/TrangBaoSucKheo5'
-import TrangBaoSucKheo6 from './pages/TrangBaoSucKheo6'
+import ConsultPharmacy from './pages/ConsultPharmacy'
+import HealthNewsDetail from './pages/HealthNewsDetail'
+import CartPage from './pages/CartPage'
+import CheckoutPage from './pages/CheckoutPage'
+import MomoResultPage from './pages/MomoResultPage'
+import ProfilePage from './pages/ProfilePage.tsx'
 
 const getProductIdFromPath = () => {
   const match = window.location.pathname.match(/^\/product\/([^/]+)$/)
@@ -21,6 +20,10 @@ const getCategoryIdFromPath = () => {
 }
 
 const isConsultPagePath = () => /^\/mua-thuoc-tu-van\/?$/.test(window.location.pathname)
+const isCartPagePath = () => /^\/gio-hang\/?$/.test(window.location.pathname)
+const isCheckoutPagePath = () => /^\/thanh-toan\/?$/.test(window.location.pathname)
+const isMomoResultPagePath = () => /^\/checkout\/momo-return\/?$/.test(window.location.pathname)
+const isProfilePagePath = () => /^\/profile\/?$/.test(window.location.pathname)
 
 const getHealthNewsIdFromPath = () => {
   const match = window.location.pathname.match(/^\/ban-tin-suc-khoe\/(1|2|3|4|5|6)$/)
@@ -31,6 +34,10 @@ function App() {
 	const [activeProductId, setActiveProductId] = useState(getProductIdFromPath())
 	const [activeCategoryId, setActiveCategoryId] = useState(getCategoryIdFromPath())
   const [isConsultPage, setIsConsultPage] = useState(isConsultPagePath())
+  const [isCartPage, setIsCartPage] = useState(isCartPagePath())
+  const [isCheckoutPage, setIsCheckoutPage] = useState(isCheckoutPagePath())
+  const [isMomoResultPage, setIsMomoResultPage] = useState(isMomoResultPagePath())
+  const [isProfilePage, setIsProfilePage] = useState(isProfilePagePath())
   const [activeHealthNewsId, setActiveHealthNewsId] = useState(getHealthNewsIdFromPath())
 
   const scrollToTop = () => {
@@ -42,6 +49,10 @@ function App() {
 		setActiveProductId(getProductIdFromPath())
 		setActiveCategoryId(getCategoryIdFromPath())
     setIsConsultPage(isConsultPagePath())
+    setIsCartPage(isCartPagePath())
+    setIsCheckoutPage(isCheckoutPagePath())
+    setIsMomoResultPage(isMomoResultPagePath())
+    setIsProfilePage(isProfilePagePath())
     setActiveHealthNewsId(getHealthNewsIdFromPath())
     }
 
@@ -70,6 +81,9 @@ function App() {
     setActiveProductId(productId)
     setActiveCategoryId('')
     setIsConsultPage(false)
+    setIsCartPage(false)
+    setIsCheckoutPage(false)
+    setIsProfilePage(false)
     setActiveHealthNewsId('')
   }
 
@@ -83,6 +97,9 @@ function App() {
     setActiveCategoryId(categoryId)
     setActiveProductId('')
     setIsConsultPage(false)
+    setIsCartPage(false)
+    setIsCheckoutPage(false)
+    setIsProfilePage(false)
     setActiveHealthNewsId('')
   }
 
@@ -91,6 +108,9 @@ function App() {
     setActiveProductId('')
     setActiveCategoryId('')
     setIsConsultPage(true)
+    setIsCartPage(false)
+    setIsCheckoutPage(false)
+    setIsProfilePage(false)
     setActiveHealthNewsId('')
   }
 
@@ -103,6 +123,9 @@ function App() {
     setActiveProductId('')
     setActiveCategoryId('')
     setIsConsultPage(false)
+    setIsCartPage(false)
+    setIsCheckoutPage(false)
+    setIsProfilePage(false)
     setActiveHealthNewsId(newsId)
   }
 
@@ -111,6 +134,9 @@ function App() {
     setActiveProductId('')
     setActiveCategoryId('')
     setIsConsultPage(false)
+    setIsCartPage(false)
+    setIsCheckoutPage(false)
+    setIsProfilePage(false)
     setActiveHealthNewsId('')
   }
 
@@ -129,31 +155,35 @@ function App() {
   }
 
   if (isConsultPage) {
-    return <MuaThuocTuVan onBackHome={backHome} />
+    return <ConsultPharmacy onBackHome={backHome} />
   }
 
-  if (activeHealthNewsId === '1') {
-    return <TrangBaoSucKheo1 onBackHome={backHome} />
+  if (isCartPage) {
+    return <CartPage onBackHome={backHome} />
   }
 
-  if (activeHealthNewsId === '2') {
-    return <TrangBaoSucKheo2 onBackHome={backHome} />
+  if (isCheckoutPage) {
+    return (
+      <CheckoutPage
+        onBackToCart={() => {
+          window.history.pushState({}, '', '/gio-hang')
+          window.dispatchEvent(new PopStateEvent('popstate'))
+        }}
+        onBackHome={backHome}
+      />
+    )
   }
 
-  if (activeHealthNewsId === '3') {
-    return <TrangBaoSucKheo3 onBackHome={backHome} />
+  if (isMomoResultPage) {
+    return <MomoResultPage />
   }
 
-  if (activeHealthNewsId === '4') {
-    return <TrangBaoSucKheo4 onBackHome={backHome} />
+  if (isProfilePage) {
+    return <ProfilePage onBackHome={backHome} />
   }
 
-  if (activeHealthNewsId === '5') {
-    return <TrangBaoSucKheo5 onBackHome={backHome} />
-  }
-
-  if (activeHealthNewsId === '6') {
-    return <TrangBaoSucKheo6 onBackHome={backHome} />
+  if (activeHealthNewsId) {
+    return <HealthNewsDetail newsId={activeHealthNewsId} onBackHome={backHome} />
   }
 
   return (

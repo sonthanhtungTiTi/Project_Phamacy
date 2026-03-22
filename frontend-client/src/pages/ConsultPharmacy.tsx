@@ -1,8 +1,8 @@
-interface MuaThuocTuVanProps {
+interface ConsultPharmacyProps {
 	onBackHome?: () => void
 }
 
-function MuaThuocTuVan({ onBackHome }: MuaThuocTuVanProps) {
+function ConsultPharmacy({ onBackHome }: ConsultPharmacyProps) {
 	const openZaloChat = () => {
 		window.open('https://zalo.me/0398668953', '_blank', 'noopener,noreferrer')
 	}
@@ -115,4 +115,4 @@ function MuaThuocTuVan({ onBackHome }: MuaThuocTuVanProps) {
 	)
 }
 
-export default MuaThuocTuVan
+export default ConsultPharmacy

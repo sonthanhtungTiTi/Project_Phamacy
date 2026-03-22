@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import LoginAndRegister from '../../pages/LoginAndRegister'
-import Profile from '../../pages/Profile'
 import type { AuthUser } from '../../services/auth.service'
+import type { ProductItem } from '../../services/product.service'
 import Footer from './footer'
 import Header from './header'
 
@@ -14,9 +14,13 @@ interface PharmacyLayoutProps {
 	categories: CategoryItem[]
 	selectedCategoryId?: string
 	onCategorySelect?: (category: CategoryItem) => void
+	onSelectAllCategories?: () => void
 	hideSidebar?: boolean
 	searchKeyword?: string
 	onSearchKeywordChange?: (keyword: string) => void
+	searchResults?: ProductItem[]
+	isSearching?: boolean
+	onSearchResultSelect?: (productId: string) => void
 	children: ReactNode
 }
 
@@ -24,13 +28,16 @@ function PharmacyLayout({
 	categories,
 	selectedCategoryId,
 	onCategorySelect,
+	onSelectAllCategories,
 	hideSidebar = false,
 	searchKeyword = '',
 	onSearchKeywordChange,
+	searchResults = [],
+	isSearching = false,
+	onSearchResultSelect,
 	children,
 }: PharmacyLayoutProps) {
 	const [isAuthOpen, setIsAuthOpen] = useState(false)
-	const [isProfileOpen, setIsProfileOpen] = useState(false)
 	const [authUser, setAuthUser] = useState<AuthUser | null>(null)
 
 	useEffect(() => {
@@ -53,12 +60,6 @@ function PharmacyLayout({
 		localStorage.removeItem('clientAccessToken')
 		localStorage.removeItem('clientUser')
 		setAuthUser(null)
-		setIsProfileOpen(false)
-	}
-
-	const handleProfileSave = (updatedUser: AuthUser) => {
-		localStorage.setItem('clientUser', JSON.stringify(updatedUser))
-		setAuthUser(updatedUser)
 	}
 
 	return (
@@ -66,10 +67,21 @@ function PharmacyLayout({
 			<Header
 				authUser={authUser}
 				onOpenAuth={() => setIsAuthOpen(true)}
-				onOpenProfile={() => setIsProfileOpen(true)}
+				onOpenProfile={() => {
+					if (!authUser) {
+						setIsAuthOpen(true)
+						return
+					}
+
+					window.history.pushState({}, '', '/profile')
+					window.dispatchEvent(new PopStateEvent('popstate'))
+				}}
 				onLogout={handleLogout}
 				searchKeyword={searchKeyword}
 				onSearchKeywordChange={onSearchKeywordChange}
+				searchResults={searchResults}
+				isSearching={isSearching}
+				onSearchResultSelect={onSearchResultSelect}
 			/>
 
 			<div className="mx-auto max-w-[1280px]">
@@ -80,6 +92,20 @@ function PharmacyLayout({
 						<div className="grid grid-cols-1 gap-4 lg:grid-cols-[250px_1fr]">
 							<aside className="rounded-2xl bg-white p-4 shadow-sm">
 								<h2 className="mb-4 text-lg font-bold text-[#23a840]">Danh muc</h2>
+								{onSelectAllCategories && (
+									<button
+										type="button"
+										onClick={onSelectAllCategories}
+										className={`mb-3 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${
+											!selectedCategoryId
+												? 'bg-[#e9f9ed] font-semibold text-[#1f9542]'
+												: 'text-slate-700 hover:bg-[#f2fbf4] hover:text-[#1f9542]'
+										}`}
+									>
+										Tat ca danh muc
+										<span aria-hidden="true">&gt;</span>
+									</button>
+								)}
 								<ul className="space-y-1 text-sm text-slate-700">
 									{categories.map((item) => (
 										<li key={item._id}>
@@ -122,14 +148,6 @@ function PharmacyLayout({
 				<LoginAndRegister
 					onClose={() => setIsAuthOpen(false)}
 					onAuthSuccess={(user) => setAuthUser(user)}
-				/>
-			)}
-
-			{isProfileOpen && authUser && (
-				<Profile
-					user={authUser}
-					onClose={() => setIsProfileOpen(false)}
-					onSave={handleProfileSave}
 				/>
 			)}
 		</main>

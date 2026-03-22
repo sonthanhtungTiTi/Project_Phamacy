@@ -4,6 +4,7 @@ import ProductCard from '../components/ui/product-card'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { getCategories } from '../services/category.service'
 import { getProducts, type ProductItem } from '../services/product.service'
+import { getHealthNews, type HealthNewsBlock } from '../services/healthNews.service'
 
 const quickActions = [
 	{ label: 'Mua thuoc, tu van', icon: 'RX', openConsultPage: true },
@@ -25,45 +26,6 @@ const heroBanners = [
 		href: '/chuong-trinh/flashsale',
 		image: 'https://cdnv2.tgdd.vn/mwg-static/ankhang/Banner/ad/a9/ada975d94ec04c14c1e19ab03aa27fcc.png',
 		alt: 'Tuan le hanh phuc Alfe',
-	},
-]
-
-const healthNews = [
-	{
-		id: '1',
-		title: '11 tac dung cua dau tay voi suc khoe ban nen biet',
-		date: '17/03/2026',
-		image: 'https://cdnv2.tgdd.vn/mwg-static/ankhang/News/Thumb/1564370/dau-tay-co-tac-dung-gi639094412853630624.jpg',
-	},
-	{
-		id: '2',
-		title: 'Top 23 kem chong nang pho rong cac bac si da lieu khuyen dung',
-		date: '14/03/2026',
-		image: 'https://cdnv2.tgdd.vn/mwg-static/ankhang/News/Thumb/1534796/top-kem-chong-nang-pho-rong639092741642479141.jpg',
-	},
-	{
-		id: '3',
-		title: 'Nen mua duong an kieng loai nao cho che do an lanh manh?',
-		date: '16/03/2026',
-		image: 'https://images.unsplash.com/photo-1606787366850-de6330128bfc?auto=format&fit=crop&w=1200&q=80',
-	},
-	{
-		id: '4',
-		title: 'La lot co tac dung gi? Cach dung, lieu dung va tac dung phu',
-		date: '15/03/2026',
-		image: 'https://cdnv2.tgdd.vn/mwg-static/common/News/1516538/la-lot-la-cay-than-thao-mem-moc-thanh-tung-bui.jpg',
-	},
-	{
-		id: '5',
-		title: 'Cam nang kem chong nang pho rong cho da dau va da nhay cam',
-		date: '13/03/2026',
-		image: 'https://cdn.tgdd.vn/News/1534796/top-23-kem-chong-nang-pho-rong-tot-nhat-cac-bac-3-800x450.jpg',
-	},
-	{
-		id: '6',
-		title: 'Top 21 sua rua mat cho da dau mun duoc khuyen dung',
-		date: '12/03/2026',
-		image: 'https://images.unsplash.com/photo-1629198688000-71f23e745b6e?auto=format&fit=crop&w=1200&q=80',
 	},
 ]
 
@@ -125,9 +87,14 @@ interface CategorySection {
 function HomePage({ onOpenProductDetail, onOpenCategory, onOpenConsultPage, onOpenHealthNews }: HomePageProps) {
 	const [categories, setCategories] = useState<CategoryItem[]>([])
 	const [sections, setSections] = useState<CategorySection[]>([])
+	const [searchResults, setSearchResults] = useState<ProductItem[]>([])
+	const [isSearching, setIsSearching] = useState(false)
 	const [isLoadingProducts, setIsLoadingProducts] = useState(false)
 	const [productError, setProductError] = useState('')
 	const [searchKeyword, setSearchKeyword] = useState('')
+	const [healthNews, setHealthNews] = useState<HealthNewsBlock[]>([])
+	const [isLoadingHealthNews, setIsLoadingHealthNews] = useState(false)
+	const [healthNewsError, setHealthNewsError] = useState('')
 	const debouncedSearchKeyword = useDebouncedValue(searchKeyword.trim())
 
 	const openCategoryPage = (categoryId: string) => {
@@ -180,6 +147,25 @@ function HomePage({ onOpenProductDetail, onOpenCategory, onOpenConsultPage, onOp
 	}
 
 	useEffect(() => {
+		const loadHealthNews = async () => {
+			try {
+				setIsLoadingHealthNews(true)
+				setHealthNewsError('')
+				const data = await getHealthNews()
+				// Lấy 5 bài viết đầu tiên
+				setHealthNews(data.slice(0, 5))
+			} catch (error) {
+				setHealthNews([])
+				setHealthNewsError(error instanceof Error ? error.message : 'Khong the tai ban tin suc khoe')
+			} finally {
+				setIsLoadingHealthNews(false)
+			}
+		}
+
+		loadHealthNews()
+	}, [])
+
+	useEffect(() => {
 		const loadProducts = async () => {
 			try {
 				setIsLoadingProducts(true)
@@ -196,7 +182,6 @@ function HomePage({ onOpenProductDetail, onOpenCategory, onOpenConsultPage, onOp
 					categoryData.map(async (category) => {
 						const data = await getProducts({
 							categoryId: category._id,
-							search: debouncedSearchKeyword,
 							limit: 4,
 						})
 
@@ -218,7 +203,42 @@ function HomePage({ onOpenProductDetail, onOpenCategory, onOpenConsultPage, onOp
 		}
 
 		void loadProducts()
+	}, [])
+
+	useEffect(() => {
+		const loadSearchResults = async () => {
+			if (!debouncedSearchKeyword) {
+				setSearchResults([])
+				setIsSearching(false)
+				return
+			}
+
+			try {
+				setIsSearching(true)
+				const data = await getProducts({
+					search: debouncedSearchKeyword,
+					limit: 8,
+				})
+				setSearchResults(data.items)
+			} catch {
+				setSearchResults([])
+			} finally {
+				setIsSearching(false)
+			}
+		}
+
+		void loadSearchResults()
 	}, [debouncedSearchKeyword])
+
+	const handleSearchResultSelect = (productId: string) => {
+		if (!productId) {
+			return
+		}
+
+		onOpenProductDetail?.(productId)
+		setSearchKeyword('')
+		setSearchResults([])
+	}
 
 	return (
 		<PharmacyLayout
@@ -226,6 +246,9 @@ function HomePage({ onOpenProductDetail, onOpenCategory, onOpenConsultPage, onOp
 			onCategorySelect={(category) => openCategoryPage(category._id)}
 			searchKeyword={searchKeyword}
 			onSearchKeywordChange={setSearchKeyword}
+			searchResults={searchResults}
+			isSearching={isSearching}
+			onSearchResultSelect={handleSearchResultSelect}
 		>
 			<div className="grid grid-cols-2 gap-3 rounded-2xl bg-white p-3 shadow-sm sm:grid-cols-3 xl:grid-cols-7">
 				{quickActions.map((item) => (
@@ -384,36 +407,50 @@ function HomePage({ onOpenProductDetail, onOpenCategory, onOpenConsultPage, onOp
 					</button>
 				</div>
 
-				<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-					{healthNews.map((item) => (
-						<article
-							key={item.id}
-							role="button"
-							tabIndex={0}
-							onClick={() => openHealthNewsPage(item.id)}
-							onKeyDown={(event) => {
-								if (event.key === 'Enter' || event.key === ' ') {
-									event.preventDefault()
-									openHealthNewsPage(item.id)
-								}
-							}}
-							className="cursor-pointer rounded-lg border border-slate-200 p-2 transition hover:border-[#7fcf8a] hover:shadow-sm"
-						>
-							<div className="overflow-hidden rounded-md">
-								<img
-									src={item.image}
-									alt={item.title}
-									loading="lazy"
-									className="h-[150px] w-full object-cover"
-								/>
-							</div>
-							<h4 className="mt-2 line-clamp-2 text-[15px] font-semibold leading-5 text-slate-800">
-								{item.title}
-							</h4>
-							<p className="mt-1 text-xs text-slate-500">{item.date}</p>
-						</article>
-					))}
-				</div>
+				{isLoadingHealthNews && (
+					<p className="py-4 text-sm text-slate-600">Dang tai ban tin suc khoe...</p>
+				)}
+
+				{!isLoadingHealthNews && healthNewsError && (
+					<p className="py-4 text-sm text-red-500">{healthNewsError}</p>
+				)}
+
+				{!isLoadingHealthNews && !healthNewsError && healthNews.length === 0 && (
+					<p className="py-4 text-sm text-slate-600">Chua co ban tin suc khoe.</p>
+				)}
+
+				{!isLoadingHealthNews && !healthNewsError && healthNews.length > 0 && (
+					<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+						{healthNews.map((item) => (
+							<article
+								key={item.newsId}
+								role="button"
+								tabIndex={0}
+								onClick={() => openHealthNewsPage(item.newsId)}
+								onKeyDown={(event) => {
+									if (event.key === 'Enter' || event.key === ' ') {
+										event.preventDefault()
+										openHealthNewsPage(item.newsId)
+									}
+								}}
+								className="cursor-pointer rounded-lg border border-slate-200 p-2 transition hover:border-[#7fcf8a] hover:shadow-sm"
+							>
+								<div className="overflow-hidden rounded-md">
+									<img
+										src={item.heroImage}
+										alt={item.title}
+										loading="lazy"
+										className="h-[150px] w-full object-cover"
+									/>
+								</div>
+								<h4 className="mt-2 line-clamp-2 text-[15px] font-semibold leading-5 text-slate-800">
+									{item.title}
+								</h4>
+								<p className="mt-1 text-xs text-slate-500">{item.updatedAt}</p>
+							</article>
+						))}
+					</div>
+				)}
 			</section>
 		</PharmacyLayout>
 	)

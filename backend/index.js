@@ -4,6 +4,7 @@ const cors = require('cors')
 const dotenv = require('dotenv')
 
 const clientRoutes = require('./src/routes/client')
+const adminRoutes = require('./src/routes/admin')
 
 dotenv.config()
 
@@ -21,6 +22,7 @@ app.get('/', (req, res) => {
 })
 
 app.use('/api/client', clientRoutes)
+app.use('/api/admin', adminRoutes)
 
 const startServer = async () => {
     try {

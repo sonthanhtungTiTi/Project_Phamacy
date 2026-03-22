@@ -14,6 +14,8 @@ interface CategoryPageProps {
 function Category({ categoryId, onBackHome, onOpenProductDetail }: CategoryPageProps) {
 	const [categories, setCategories] = useState<CategoryItem[]>([])
 	const [products, setProducts] = useState<ProductItem[]>([])
+	const [searchResults, setSearchResults] = useState<ProductItem[]>([])
+	const [isSearching, setIsSearching] = useState(false)
 	const [isLoading, setIsLoading] = useState(false)
 	const [error, setError] = useState('')
 	const [isLoadingCategories, setIsLoadingCategories] = useState(false)
@@ -43,7 +45,7 @@ function Category({ categoryId, onBackHome, onOpenProductDetail }: CategoryPageP
 
 	useEffect(() => {
 		setCurrentPage(1)
-	}, [categoryId, debouncedSearchKeyword])
+	}, [categoryId])
 
 	useEffect(() => {
 		window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -63,7 +65,6 @@ function Category({ categoryId, onBackHome, onOpenProductDetail }: CategoryPageP
 				setError('')
 				const data = await getProducts({
 					categoryId,
-					search: debouncedSearchKeyword,
 					page: currentPage,
 					limit: PAGE_SIZE,
 				})
@@ -81,7 +82,32 @@ function Category({ categoryId, onBackHome, onOpenProductDetail }: CategoryPageP
 		}
 
 		void loadCategoryProducts()
-	}, [categoryId, currentPage, debouncedSearchKeyword])
+	}, [categoryId, currentPage])
+
+	useEffect(() => {
+		const loadSearchResults = async () => {
+			if (!debouncedSearchKeyword) {
+				setSearchResults([])
+				setIsSearching(false)
+				return
+			}
+
+			try {
+				setIsSearching(true)
+				const data = await getProducts({
+					search: debouncedSearchKeyword,
+					limit: 8,
+				})
+				setSearchResults(data.items)
+			} catch {
+				setSearchResults([])
+			} finally {
+				setIsSearching(false)
+			}
+		}
+
+		void loadSearchResults()
+	}, [debouncedSearchKeyword])
 
 	const categoryLabel = useMemo(() => {
 		const fromStatic = categories.find((item) => item._id === categoryId)?.categoryName
@@ -90,7 +116,7 @@ function Category({ categoryId, onBackHome, onOpenProductDetail }: CategoryPageP
 		}
 
 		return products[0]?.categoryName || 'Danh mục'
-	}, [categoryId, products])
+	}, [categoryId, categories, products])
 
 	const extractFirstImage = (images: string) => {
 		if (!images) {
@@ -136,13 +162,27 @@ function Category({ categoryId, onBackHome, onOpenProductDetail }: CategoryPageP
 		window.dispatchEvent(new PopStateEvent('popstate'))
 	}
 
+	const handleSearchResultSelect = (productId: string) => {
+		if (!productId) {
+			return
+		}
+
+		onOpenProductDetail?.(productId)
+		setSearchKeyword('')
+		setSearchResults([])
+	}
+
 	return (
 		<PharmacyLayout
 			categories={categories}
 			selectedCategoryId={categoryId}
 			onCategorySelect={(category) => openCategoryDetail(category._id)}
+			onSelectAllCategories={onBackHome}
 			searchKeyword={searchKeyword}
 			onSearchKeywordChange={setSearchKeyword}
+			searchResults={searchResults}
+			isSearching={isSearching}
+			onSearchResultSelect={handleSearchResultSelect}
 		>
 			<div className="mb-1 flex items-center justify-between gap-3 rounded-2xl bg-white p-4 shadow-sm">
 				<div>

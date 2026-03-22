@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import PharmacyLayout, { type CategoryItem } from '../components/layout/layout'
+import AddToCartModal from '../components/ui/add-to-cart-modal'
 import ProductCard from '../components/ui/product-card'
+import { useCart } from '../hooks/useCart'
 import {
 	getProductDetail,
 	getProducts,
@@ -51,10 +54,13 @@ const detailRows = (product: ProductDetailData) => [
 ].filter((item) => Boolean(item.value))
 
 function ProductDetail({ productId, onBackHome }: ProductDetailProps) {
+	const { addItem } = useCart()
 	const [product, setProduct] = useState<ProductDetailData | null>(null)
 	const [selectedImageIndex, setSelectedImageIndex] = useState(0)
 	const [isLoading, setIsLoading] = useState(false)
 	const [error, setError] = useState('')
+	const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+	const [addToCartMessage, setAddToCartMessage] = useState('')
 	const [relatedProducts, setRelatedProducts] = useState<ProductItem[]>([])
 	const [isLoadingRelated, setIsLoadingRelated] = useState(false)
 	const [relatedError, setRelatedError] = useState('')
@@ -68,7 +74,7 @@ function ProductDetail({ productId, onBackHome }: ProductDetailProps) {
 				setProduct(data)
 			} catch (apiError) {
 				setProduct(null)
-				setError(apiError instanceof Error ? apiError.message : 'Khong the tai chi tiet san pham')
+				setError(apiError instanceof Error ? apiError.message : 'Không thể tải chi tiết sản phẩm')
 			} finally {
 				setIsLoading(false)
 			}
@@ -102,7 +108,7 @@ function ProductDetail({ productId, onBackHome }: ProductDetailProps) {
 				setRelatedProducts(data.items.filter((item) => item.id !== productId))
 			} catch (apiError) {
 				setRelatedProducts([])
-				setRelatedError(apiError instanceof Error ? apiError.message : 'Khong the tai san pham lien quan')
+				setRelatedError(apiError instanceof Error ? apiError.message : 'Không thể tải sản phẩm liên quan')
 			} finally {
 				setIsLoadingRelated(false)
 			}
@@ -164,20 +170,30 @@ function ProductDetail({ productId, onBackHome }: ProductDetailProps) {
 		window.dispatchEvent(new PopStateEvent('popstate'))
 	}
 
+	const handleAddToCart = async (quantity: number) => {
+		if (!product?._id) {
+			throw new Error('Sản phẩm không hợp lệ')
+		}
+
+		await addItem(product._id, quantity)
+		setAddToCartMessage('Đã thêm vào giỏ thuốc')
+	}
+
 	return (
 		<PharmacyLayout categories={categories} hideSidebar>
 			<div className="mb-1">
 				<button
 					type="button"
 					onClick={onBackHome}
-					className="rounded-full border border-[#38b54a] bg-white px-4 py-2 text-sm font-semibold text-[#1f9542] transition hover:bg-[#ebf9ee]"
+					className="flex items-center gap-2 rounded-full border border-[#38b54a] bg-white px-4 py-2 text-sm font-semibold text-[#1f9542] transition hover:bg-[#ebf9ee]"
 				>
-					← Quay lại trang chủ
+					<ArrowBackIcon sx={{ fontSize: 18 }} />
+					Quay lại trang chủ
 				</button>
 			</div>
 
 			{isLoading && (
-				<div className="rounded-2xl bg-white p-6 text-sm text-slate-600 shadow-sm">Dang tai chi tiet san pham...</div>
+				<div className="rounded-2xl bg-white p-6 text-sm text-slate-600 shadow-sm">Đang tải chi tiết sản phẩm...</div>
 			)}
 
 			{!isLoading && error && (
@@ -248,6 +264,10 @@ function ProductDetail({ productId, onBackHome }: ProductDetailProps) {
 							<div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
 								<button
 									type="button"
+									onClick={() => {
+										setAddToCartMessage('')
+										setIsAddModalOpen(true)
+									}}
 									className="h-11 rounded-xl bg-[#35b548] text-base font-semibold text-white transition hover:brightness-95"
 								>
 									Chọn mua
@@ -259,6 +279,16 @@ function ProductDetail({ productId, onBackHome }: ProductDetailProps) {
 									Chat Zalo
 								</button>
 							</div>
+							{addToCartMessage && (
+								<p className="mt-3 text-sm text-slate-600">{addToCartMessage}</p>
+							)}
+							<AddToCartModal
+								isOpen={isAddModalOpen}
+								productName={product.productName}
+								priceLabel={product.price}
+								onClose={() => setIsAddModalOpen(false)}
+								onConfirm={handleAddToCart}
+							/>
 							<p className="mt-3 text-sm text-slate-500">Tư vấn từ 8:00 - 21:30</p>
 						</section>
 
@@ -299,7 +329,7 @@ function ProductDetail({ productId, onBackHome }: ProductDetailProps) {
 							</div>
 
 							{isLoadingRelated && (
-								<p className="py-4 text-sm text-slate-600">Dang tai san pham lien quan...</p>
+								<p className="py-4 text-sm text-slate-600">Đang tải sản phẩm liên quan...</p>
 							)}
 
 							{!isLoadingRelated && relatedError && (
@@ -307,7 +337,7 @@ function ProductDetail({ productId, onBackHome }: ProductDetailProps) {
 							)}
 
 							{!isLoadingRelated && !relatedError && relatedProducts.length === 0 && (
-								<p className="py-4 text-sm text-slate-600">Chua co san pham cung danh muc.</p>
+								<p className="py-4 text-sm text-slate-600">Chưa có sản phẩm cùng danh mục.</p>
 							)}
 
 							{!isLoadingRelated && !relatedError && relatedProducts.length > 0 && (

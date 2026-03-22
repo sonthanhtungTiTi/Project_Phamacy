@@ -86,6 +86,21 @@ interface ResetForgotPasswordResponse {
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/$/, '')
 
+const getAccessToken = () => localStorage.getItem('clientAccessToken') || ''
+
+const getAuthHeaders = () => {
+	const accessToken = getAccessToken()
+
+	if (!accessToken) {
+		throw new Error('Vui long dang nhap lai de cap nhat thong tin')
+	}
+
+	return {
+		'Content-Type': 'application/json',
+		Authorization: `Bearer ${accessToken}`,
+	}
+}
+
 export const loginWithGoogle = async (idToken: string) => {
 	const response = await fetch(`${API_BASE_URL}/client/auth/google`, {
 		method: 'POST',
@@ -161,9 +176,7 @@ export const loginWithForm = async (loginPayload: LoginPayload) => {
 export const updateProfile = async (userId: string, profilePayload: Partial<AuthUser>) => {
 	const response = await fetch(`${API_BASE_URL}/client/auth/profile/${userId}`, {
 		method: 'PUT',
-		headers: {
-			'Content-Type': 'application/json',
-		},
+		headers: getAuthHeaders(),
 		body: JSON.stringify(profilePayload),
 	})
 

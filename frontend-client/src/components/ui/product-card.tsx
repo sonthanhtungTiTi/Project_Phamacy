@@ -1,3 +1,8 @@
+import { useState } from 'react'
+import { notifyCartUpdated } from '../../hooks/useCart'
+import { addToCart } from '../../services/cart.service'
+import AddToCartModal from './add-to-cart-modal'
+
 interface ProductCardProps {
 	productCode?: string
 	productId?: string
@@ -23,6 +28,8 @@ function ProductCard({
 	totalCount = 20,
 	onViewDetail,
 }: ProductCardProps) {
+	const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+	const [addResultMessage, setAddResultMessage] = useState('')
 	const safeTotal = totalCount > 0 ? totalCount : 20
 	const safeSold = Math.min(Math.max(soldCount, 0), safeTotal)
 	const progressPercent = Math.round((safeSold / safeTotal) * 100)
@@ -31,6 +38,26 @@ function ProductCard({
 		if (productId && onViewDetail) {
 			onViewDetail(productId)
 		}
+	}
+
+	const handleOpenAddModal = () => {
+		if (!productId) {
+			setAddResultMessage('Sản phẩm này chưa sẵn sàng để thêm vào giỏ')
+			return
+		}
+
+		setAddResultMessage('')
+		setIsAddModalOpen(true)
+	}
+
+	const handleConfirmAddToCart = async (quantity: number) => {
+		if (!productId) {
+			throw new Error('Sản phẩm không hợp lệ')
+		}
+
+		await addToCart(productId, quantity)
+		notifyCartUpdated()
+		setAddResultMessage('Đã thêm vào giỏ thuốc')
 	}
 
 	return (
@@ -87,11 +114,23 @@ function ProductCard({
 			<div className="p-3 pt-0">
 				<button
 					type="button"
+					onClick={handleOpenAddModal}
 					className="h-10 w-full rounded-xl bg-[#35b548] text-sm font-semibold text-white transition hover:brightness-95"
 				>
 					Thêm vào giỏ
 				</button>
+				{addResultMessage && <p className="mt-2 text-xs text-slate-600">{addResultMessage}</p>}
 			</div>
+
+			<AddToCartModal
+				isOpen={isAddModalOpen}
+				productName={name}
+				priceLabel={price}
+				originalPriceLabel={originalPrice}
+				saleLabel={sale}
+				onClose={() => setIsAddModalOpen(false)}
+				onConfirm={handleConfirmAddToCart}
+			/>
 		</article>
 	)
 }
