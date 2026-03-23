@@ -1,351 +1,237 @@
-import { useEffect, useMemo, useState } from 'react'
-import {
-	getAdminOrderDetail,
-	listAdminOrders,
-	updateAdminOrderStatus,
-	type AdminOrderData,
-	type OrderStatus,
-	type PaymentStatus,
-} from '../services/order.service.ts'
+export default function OrdersPage() {
+    const orders = [
+      {
+        id: '#RX-88291',
+        patientInitials: 'EM',
+        patientColor: 'bg-blue-100 text-blue-600',
+        patientName: 'Eleanor Miller',
+        patientId: 'ID: 992-001-A',
+        medication: 'Atorvastatin 20mg',
+        date: 'Oct 24, 2023',
+        status: 'PROCESSING',
+        statusColor: 'bg-green-50 text-green-600',
+        value: '$142.50'
+      },
+      {
+        id: '#RX-88292',
+        patientInitials: 'JD',
+        patientColor: 'bg-indigo-100 text-indigo-600',
+        patientName: 'Jameson Doherty',
+        patientId: 'ID: 881-224-C',
+        medication: 'Amoxicillin 500mg',
+        date: 'Oct 24, 2023',
+        status: 'SHIPPED',
+        statusColor: 'bg-blue-50 text-blue-600',
+        value: '$38.12'
+      },
+      {
+        id: '#RX-88295',
+        patientInitials: 'SW',
+        patientColor: 'bg-teal-100 text-teal-600',
+        patientName: 'Sarah Waters',
+        patientId: 'ID: 412-909-B',
+        medication: 'Lisinopril 10mg',
+        date: 'Oct 23, 2023',
+        status: 'ON HOLD',
+        statusColor: 'bg-orange-50 text-orange-600',
+        value: '$210.00'
+      },
+      {
+        id: '#RX-88301',
+        patientInitials: 'AL',
+        patientColor: 'bg-rose-100 text-rose-600',
+        patientName: 'Arthur Lewis',
+        patientId: 'ID: 003-112-D',
+        medication: 'Metformin 500mg',
+        date: 'Oct 23, 2023',
+        status: 'CANCELLED',
+        statusColor: 'bg-gray-100 text-gray-500',
+        value: '$12.40'
+      }
+    ];
+  
+    return (
+      <div className="flex flex-col gap-6">
+        {/* Header Section */}
+        <div className="flex justify-between items-end mb-2">
+            <div>
+                <div className="flex items-center gap-2 text-[10px] font-bold text-primary tracking-widest uppercase mb-2">
+                    OPERATIONAL CONSOLE
+                </div>
+                <h1 className="text-[28px] font-bold text-gray-900 mb-1">Order Management</h1>
+                <p className="text-gray-500 text-[15px]">Real-time prescription monitoring and pharmaceutical logistics oversight.</p>
+            </div>
+          <div className="flex gap-3">
+            <button className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 bg-white rounded-md text-gray-700 font-bold text-[13px] hover:bg-gray-50 transition-colors shadow-sm">
+              <i className="fa-solid fa-download text-gray-400"></i>
+              Export CSV
+            </button>
+            <button className="flex items-center gap-2 px-4 py-2.5 bg-dark text-white rounded-md font-bold text-[13px] hover:bg-gray-900 transition-colors shadow-sm">
+              <i className="fa-solid fa-plus"></i>
+              Direct Entry
+            </button>
+          </div>
+        </div>
+  
+        {/* Main Content Area */}
+        <div className="bg-white rounded-xl shadow-[0_2px_10px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col overflow-hidden">
+           {/* Filters Toolbar */}
+           <div className="p-6 border-b border-gray-100 flex items-end gap-6 bg-gray-50/30">
+               <div className="flex-1">
+                   <label className="block text-[10px] font-bold text-gray-400 tracking-widest uppercase mb-2">Order Status</label>
+                   <div className="relative">
+                       <select className="w-full appearance-none bg-white border border-gray-200 rounded-md py-2.5 pl-4 pr-10 text-sm focus:ring-1 focus:ring-primary focus:outline-none text-gray-700 font-medium cursor-pointer relative z-10 bg-transparent">
+                           <option>All Statuses</option>
+                       </select>
+                       <i className="fa-solid fa-chevron-down absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none z-0"></i>
+                   </div>
+               </div>
+               
+               <div className="flex-1">
+                   <label className="block text-[10px] font-bold text-gray-400 tracking-widest uppercase mb-2">Date Range</label>
+                   <div className="relative">
+                       <button className="w-full flex justify-between items-center bg-white border border-gray-200 rounded-md py-2.5 px-4 text-sm text-gray-700 font-medium">
+                           <span className="flex items-center gap-2"><i className="fa-regular fa-calendar text-gray-400"></i> Last 30 Days</span>
+                       </button>
+                   </div>
+               </div>
 
-const ORDER_STATUS_OPTIONS: Array<{ value: string; label: string }> = [
-	{ value: '', label: 'Tất cả trạng thái' },
-	{ value: 'pending', label: 'Chờ xác nhận' },
-	{ value: 'confirmed', label: 'Đã xác nhận' },
-	{ value: 'shipping', label: 'Đang giao' },
-	{ value: 'completed', label: 'Hoàn tất' },
-	{ value: 'cancelled', label: 'Đã hủy' },
-]
+               <div className="flex-1">
+                   <label className="block text-[10px] font-bold text-gray-400 tracking-widest uppercase mb-2">Customer Priority</label>
+                   <div className="relative">
+                       <select className="w-full appearance-none bg-white border border-gray-200 rounded-md py-2.5 pl-4 pr-10 text-sm focus:ring-1 focus:ring-primary focus:outline-none text-gray-700 font-medium cursor-pointer relative z-10 bg-transparent">
+                           <option>All Priorities</option>
+                       </select>
+                       <i className="fa-solid fa-chevron-down absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none z-0"></i>
+                   </div>
+               </div>
 
-const PAYMENT_STATUS_OPTIONS: Array<{ value: PaymentStatus; label: string }> = [
-	{ value: 'unpaid', label: 'Chưa thanh toán' },
-	{ value: 'pending', label: 'Đang chờ thanh toán' },
-	{ value: 'paid', label: 'Đã thanh toán' },
-	{ value: 'failed', label: 'Thanh toán thất bại' },
-	{ value: 'refunded', label: 'Đã hoàn tiền' },
-]
+               <button className="px-6 py-2.5 flex items-center justify-center gap-2 bg-blue-50 text-blue-600 rounded-md font-bold text-[13px] hover:bg-blue-100 transition-colors shadow-sm">
+                   <i className="fa-solid fa-filter"></i> Apply Filters
+               </button>
+           </div>
+  
+           {/* Table */}
+           <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead className="text-[11px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 bg-white">
+                    <tr>
+                      <th className="px-6 py-5">Order ID</th>
+                      <th className="px-6 py-5">Patient / Customer</th>
+                      <th className="px-6 py-5">Medication</th>
+                      <th className="px-6 py-5">Order Date</th>
+                      <th className="px-6 py-5">Status</th>
+                      <th className="px-6 py-5">Value</th>
+                      <th className="px-6 py-5 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50 bg-white">
+                      {orders.map((order, index) => (
+                          <tr key={index} className="hover:bg-gray-50 flex-row transition-colors group">
+                              <td className="px-6 py-5 font-bold text-gray-800">{order.id}</td>
+                              <td className="px-6 py-5">
+                                  <div className="flex items-center gap-3">
+                                      <div className={`w-9 h-9 rounded-md flex items-center justify-center font-bold text-xs ${order.patientColor}`}>
+                                          {order.patientInitials}
+                                      </div>
+                                      <div className="flex flex-col">
+                                          <span className="font-bold text-gray-800 text-[14px]">{order.patientName}</span>
+                                          <span className="text-[10px] text-gray-400 font-bold tracking-widest mt-0.5">{order.patientId}</span>
+                                      </div>
+                                  </div>
+                              </td>
+                              <td className="px-6 py-5">
+                                  <div className="flex items-center gap-2 text-gray-600 font-medium">
+                                      <i className="fa-solid fa-pills text-gray-300"></i> {order.medication}
+                                  </div>
+                              </td>
+                              <td className="px-6 py-5 text-gray-600 font-medium">{order.date}</td>
+                              <td className="px-6 py-5">
+                                  <span className={`text-[10px] font-bold px-2.5 py-1.5 rounded items-center inline-flex tracking-widest uppercase ${order.statusColor}`}>
+                                      {order.status}
+                                  </span>
+                              </td>
+                              <td className="px-6 py-5 font-bold text-gray-800">{order.value}</td>
+                              <td className="px-6 py-5 text-center">
+                                  <button className="text-gray-400 hover:text-primary transition-colors p-2 opacity-0 group-hover:opacity-100">
+                                      <i className="fa-solid fa-ellipsis-vertical"></i>
+                                  </button>
+                                  <div className="w-8 opacity-100 group-hover:hidden flex items-center justify-center"></div>
+                              </td>
+                          </tr>
+                      ))}
+                  </tbody>
+                </table>
+           </div>
+  
+           {/* Pagination */}
+           <div className="p-5 border-t border-gray-100 flex justify-between items-center bg-white">
+               <div className="text-sm font-medium text-gray-500 italic">
+                   Showing 1 to 4 of 124 results
+               </div>
+               <div className="flex gap-1">
+                   <button className="w-8 h-8 flex items-center justify-center bg-primary text-white font-medium text-sm rounded shadow-sm hover:bg-primary-dark transition-colors">1</button>
+                   <button className="w-8 h-8 flex items-center justify-center bg-white border border-transparent text-gray-600 font-medium text-sm hover:bg-gray-100 rounded transition-colors">2</button>
+                   <button className="w-8 h-8 flex items-center justify-center bg-white border border-transparent text-gray-600 font-medium text-sm hover:bg-gray-100 rounded transition-colors">3</button>
+                   <span className="w-8 h-8 flex items-center justify-center text-gray-400 font-medium text-sm">...</span>
+                   <button className="w-8 h-8 flex items-center justify-center bg-white border border-transparent text-gray-600 font-medium text-sm hover:bg-gray-100 rounded transition-colors">31</button>
+                   <button className="w-8 h-8 flex items-center justify-center bg-white border border-transparent text-gray-400 font-medium text-xs hover:bg-gray-100 rounded transition-colors">
+                      <i className="fa-solid fa-chevron-right"></i>
+                   </button>
+               </div>
+           </div>
+        </div>
 
-const ORDER_STATUS_UPDATE_OPTIONS: Array<{ value: OrderStatus; label: string }> = [
-	{ value: 'pending', label: 'Chờ xác nhận' },
-	{ value: 'confirmed', label: 'Đã xác nhận' },
-	{ value: 'shipping', label: 'Đang giao' },
-	{ value: 'completed', label: 'Hoàn tất' },
-	{ value: 'cancelled', label: 'Đã hủy' },
-]
+        {/* Bottom Metrics Cards */}
+        <div className="grid grid-cols-4 gap-6 mt-2">
+            {/* Daily Throughput */}
+            <div className="bg-white rounded-xl p-5 shadow-[0_2px_10px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col justify-between h-28">
+               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Daily Throughput</p>
+               <div className="flex justify-between items-end">
+                  <h2 className="text-[32px] font-bold text-gray-800 leading-none">1,204</h2>
+                  <p className="text-[12px] font-bold text-success flex items-center gap-1">
+                     <i className="fa-solid fa-arrow-trend-up text-[10px]"></i> +12%
+                  </p>
+               </div>
+            </div>
 
-const formatDateTime = (value: string) => {
-	if (!value) return '-'
-	const date = new Date(value)
-	if (Number.isNaN(date.getTime())) return '-'
+            {/* Pending Fulfillment */}
+            <div className="bg-white rounded-xl p-5 shadow-[0_2px_10px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col justify-between h-28">
+               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Pending Fulfillment</p>
+               <div className="flex justify-between items-end">
+                  <h2 className="text-[32px] font-bold text-gray-800 leading-none">48</h2>
+                  <p className="text-[11px] font-bold text-danger flex items-center gap-1 uppercase tracking-widest">
+                     Needs Action
+                  </p>
+               </div>
+            </div>
 
-	return new Intl.DateTimeFormat('vi-VN', {
-		hour: '2-digit',
-		minute: '2-digit',
-		day: '2-digit',
-		month: '2-digit',
-		year: 'numeric',
-	}).format(date)
-}
+            {/* Avg Process Time */}
+            <div className="bg-white rounded-xl p-5 shadow-[0_2px_10px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col justify-between h-28">
+               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Avg Process Time</p>
+               <div className="flex justify-between items-end">
+                  <h2 className="text-[32px] font-bold text-gray-800 leading-none">1.4h</h2>
+                  <p className="text-[11px] font-bold text-gray-400 flex items-center gap-1">
+                     Goal: &lt; 2h
+                  </p>
+               </div>
+            </div>
 
-const formatCurrency = (value: number) => `${new Intl.NumberFormat('vi-VN').format(Math.round(value || 0))}đ`
-
-function OrderListPage() {
-	const [items, setItems] = useState<AdminOrderData[]>([])
-	const [isLoading, setIsLoading] = useState(false)
-	const [errorMessage, setErrorMessage] = useState('')
-
-	const [statusFilter, setStatusFilter] = useState('')
-	const [keywordInput, setKeywordInput] = useState('')
-	const [appliedKeyword, setAppliedKeyword] = useState('')
-	const [page, setPage] = useState(1)
-	const [limit] = useState(10)
-	const [totalPages, setTotalPages] = useState(1)
-	const [totalItems, setTotalItems] = useState(0)
-
-	const [selectedOrderId, setSelectedOrderId] = useState('')
-	const [selectedOrder, setSelectedOrder] = useState<AdminOrderData | null>(null)
-	const [isDetailLoading, setIsDetailLoading] = useState(false)
-	const [detailError, setDetailError] = useState('')
-
-	const [nextStatus, setNextStatus] = useState<OrderStatus>('pending')
-	const [nextPaymentStatus, setNextPaymentStatus] = useState<PaymentStatus>('unpaid')
-	const [adminNoteDraft, setAdminNoteDraft] = useState('')
-	const [isUpdating, setIsUpdating] = useState(false)
-	const [updateMessage, setUpdateMessage] = useState('')
-
-	const selectedOrderSummary = useMemo(() => {
-		if (!selectedOrder) return '-'
-		return `${selectedOrder.orderCode} • ${selectedOrder.customer.fullName || 'Khách lẻ'}`
-	}, [selectedOrder])
-
-	const loadOrders = async () => {
-		try {
-			setIsLoading(true)
-			setErrorMessage('')
-
-			const response = await listAdminOrders({
-				status: statusFilter || undefined,
-				keyword: appliedKeyword || undefined,
-				page,
-				limit,
-			})
-
-			setItems(response.items)
-			setTotalPages(response.pagination.totalPages || 1)
-			setTotalItems(response.pagination.total || 0)
-
-			if (response.items.length > 0 && !selectedOrderId) {
-				setSelectedOrderId(response.items[0].id)
-			}
-
-			if (response.items.length === 0) {
-				setSelectedOrderId('')
-				setSelectedOrder(null)
-			}
-		} catch (error) {
-			setErrorMessage(error instanceof Error ? error.message : 'Lỗi tải danh sách đơn hàng')
-		} finally {
-			setIsLoading(false)
-		}
-	}
-
-	const loadOrderDetail = async (orderId: string) => {
-		if (!orderId) {
-			setSelectedOrder(null)
-			return
-		}
-
-		try {
-			setIsDetailLoading(true)
-			setDetailError('')
-
-			const detail = await getAdminOrderDetail(orderId)
-			setSelectedOrder(detail)
-			setNextStatus(detail.status)
-			setNextPaymentStatus(detail.paymentStatus)
-			setAdminNoteDraft(detail.adminNote || '')
-		} catch (error) {
-			setDetailError(error instanceof Error ? error.message : 'Lỗi tải chi tiết đơn hàng')
-			setSelectedOrder(null)
-		} finally {
-			setIsDetailLoading(false)
-		}
-	}
-
-	useEffect(() => {
-		void loadOrders()
-	}, [statusFilter, appliedKeyword, page])
-
-	useEffect(() => {
-		void loadOrderDetail(selectedOrderId)
-	}, [selectedOrderId])
-
-	const handleSearch = () => {
-		setPage(1)
-		setAppliedKeyword(keywordInput.trim())
-	}
-
-	const handleResetFilter = () => {
-		setStatusFilter('')
-		setKeywordInput('')
-		setAppliedKeyword('')
-		setPage(1)
-	}
-
-	const handleUpdateOrder = async () => {
-		if (!selectedOrderId) return
-
-		try {
-			setIsUpdating(true)
-			setUpdateMessage('')
-
-			const updated = await updateAdminOrderStatus(selectedOrderId, {
-				status: nextStatus,
-				paymentStatus: nextPaymentStatus,
-				adminNote: adminNoteDraft,
-			})
-
-			setSelectedOrder(updated)
-			setUpdateMessage('Đã cập nhật trạng thái đơn hàng thành công.')
-			await loadOrders()
-		} catch (error) {
-			setUpdateMessage(error instanceof Error ? error.message : 'Không thể cập nhật trạng thái đơn hàng')
-		} finally {
-			setIsUpdating(false)
-		}
-	}
-
-	return (
-		<div className="admin-order-page">
-			<header className="admin-order-header">
-				<div>
-					<h1>Quản lý đơn hàng</h1>
-					<p>Theo dõi, xem chi tiết và cập nhật trạng thái đơn hàng của khách.</p>
-				</div>
-			</header>
-
-			<section className="admin-order-filters">
-				<select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1) }}>
-					{ORDER_STATUS_OPTIONS.map((option) => (
-						<option key={option.value} value={option.value}>{option.label}</option>
-					))}
-				</select>
-
-				<input
-					type="text"
-					placeholder="Tìm theo mã đơn, tên người nhận, số điện thoại"
-					value={keywordInput}
-					onChange={(event) => setKeywordInput(event.target.value)}
-					onKeyDown={(event) => {
-						if (event.key === 'Enter') {
-							handleSearch()
-						}
-					}}
-				/>
-
-				<button type="button" onClick={handleSearch}>Tìm kiếm</button>
-				<button type="button" className="secondary" onClick={handleResetFilter}>Đặt lại</button>
-			</section>
-
-			<section className="admin-order-grid">
-				<article className="admin-order-list-card">
-					<div className="list-header">
-						<strong>Danh sách đơn hàng</strong>
-						<span>Tổng: {totalItems}</span>
-					</div>
-
-					{isLoading && <p className="state-message">Đang tải danh sách đơn hàng...</p>}
-					{!isLoading && errorMessage && <p className="state-message error">{errorMessage}</p>}
-
-					{!isLoading && !errorMessage && items.length === 0 && (
-						<p className="state-message">Không tìm thấy đơn hàng phù hợp.</p>
-					)}
-
-					{!isLoading && !errorMessage && items.length > 0 && (
-						<div className="order-table-wrapper">
-							<table className="order-table">
-								<thead>
-									<tr>
-										<th>Mã đơn</th>
-										<th>Khách hàng</th>
-										<th>Tổng tiền</th>
-										<th>Trạng thái</th>
-										<th>Thanh toán</th>
-										<th>Đặt lúc</th>
-									</tr>
-								</thead>
-								<tbody>
-									{items.map((order) => (
-										<tr
-											key={order.id}
-											className={selectedOrderId === order.id ? 'active' : ''}
-											onClick={() => setSelectedOrderId(order.id)}
-										>
-											<td>{order.orderCode}</td>
-											<td>{order.customer.fullName || order.shippingAddress.recipientName}</td>
-											<td>{formatCurrency(order.totalAmount)}</td>
-											<td>{order.status}</td>
-											<td>{order.paymentStatus}</td>
-											<td>{formatDateTime(order.placedAt)}</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
-					)}
-
-					<div className="pagination-row">
-						<button type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>Trang trước</button>
-						<span>Trang {page} / {Math.max(1, totalPages)}</span>
-						<button type="button" disabled={page >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>Trang sau</button>
-					</div>
-				</article>
-
-				<article className="admin-order-detail-card">
-					<div className="list-header">
-						<strong>Chi tiết đơn hàng</strong>
-						<span>{selectedOrderSummary}</span>
-					</div>
-
-					{isDetailLoading && <p className="state-message">Đang tải chi tiết đơn hàng...</p>}
-					{!isDetailLoading && detailError && <p className="state-message error">{detailError}</p>}
-
-					{!isDetailLoading && !detailError && !selectedOrder && (
-						<p className="state-message">Chọn một đơn hàng để xem chi tiết.</p>
-					)}
-
-					{!isDetailLoading && !detailError && selectedOrder && (
-						<div className="detail-content">
-							<div className="detail-block">
-								<h3>Thông tin giao hàng</h3>
-								<p><strong>Người nhận:</strong> {selectedOrder.shippingAddress.recipientName}</p>
-								<p><strong>Số điện thoại:</strong> {selectedOrder.shippingAddress.phone}</p>
-								<p><strong>Địa chỉ:</strong> {selectedOrder.shippingAddress.fullAddress}</p>
-								<p><strong>Ghi chú khách:</strong> {selectedOrder.note || '-'}</p>
-							</div>
-
-							<div className="detail-block">
-								<h3>Sản phẩm trong đơn</h3>
-								<ul className="product-list">
-									{selectedOrder.items.map((item) => (
-										<li key={`${selectedOrder.id}-${item.productId}`}>
-											<img src={item.productImage || 'https://via.placeholder.com/80x80?text=SP'} alt={item.productName} />
-											<div>
-												<p>{item.productName}</p>
-												<small>Mã: {item.medicineCode || '-'} • SL: {item.quantity} • Đơn giá: {formatCurrency(item.unitPrice)}</small>
-											</div>
-											<strong>{formatCurrency(item.lineTotal)}</strong>
-										</li>
-									))}
-								</ul>
-							</div>
-
-							<div className="detail-block">
-								<h3>Cập nhật trạng thái</h3>
-								<div className="status-form-grid">
-									<label>
-										Trạng thái đơn hàng
-										<select value={nextStatus} onChange={(event) => setNextStatus(event.target.value as OrderStatus)}>
-											{ORDER_STATUS_UPDATE_OPTIONS.map((option) => (
-												<option key={option.value} value={option.value}>{option.label}</option>
-											))}
-										</select>
-									</label>
-
-									<label>
-										Trạng thái thanh toán
-										<select value={nextPaymentStatus} onChange={(event) => setNextPaymentStatus(event.target.value as PaymentStatus)}>
-											{PAYMENT_STATUS_OPTIONS.map((option) => (
-												<option key={option.value} value={option.value}>{option.label}</option>
-											))}
-										</select>
-									</label>
-								</div>
-
-								<label>
-									Ghi chú admin
-									<textarea
-										rows={3}
-										value={adminNoteDraft}
-										onChange={(event) => setAdminNoteDraft(event.target.value)}
-										placeholder="Nhập ghi chú nội bộ..."
-									/>
-								</label>
-
-								<div className="actions-row">
-									<button type="button" onClick={handleUpdateOrder} disabled={isUpdating}>
-										{isUpdating ? 'Đang cập nhật...' : 'Lưu cập nhật'}
-									</button>
-									{updateMessage && <span className="update-message">{updateMessage}</span>}
-								</div>
-							</div>
-						</div>
-					)}
-				</article>
-			</section>
-		</div>
-	)
-}
-
-export default OrderListPage
-
+            {/* Logistics Status */}
+            <div className="bg-white rounded-xl p-5 shadow-[0_2px_10px_rgb(0,0,0,0.04)] border border-gray-100 flex flex-col justify-between h-28">
+               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Logistics Status</p>
+               <div className="flex justify-between items-center h-full pt-4">
+                  <div className="flex items-center gap-2">
+                     <span className="relative flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-success"></span>
+                      </span>
+                     <span className="text-[15px] font-bold text-gray-800">Systems Nominal</span>
+                  </div>
+               </div>
+            </div>
+        </div>
+      </div>
+    );
+  }
+  
