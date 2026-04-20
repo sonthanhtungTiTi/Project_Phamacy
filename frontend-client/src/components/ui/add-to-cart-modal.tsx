@@ -1,3 +1,4 @@
+import toast from 'react-hot-toast'
 import { useEffect, useState } from 'react'
 
 interface AddToCartModalProps {
@@ -8,6 +9,7 @@ interface AddToCartModalProps {
 	saleLabel?: string
 	onClose: () => void
 	onConfirm: (quantity: number) => Promise<void> | void
+	onLoginRequired?: () => void
 }
 
 function AddToCartModal({
@@ -18,6 +20,7 @@ function AddToCartModal({
 	saleLabel,
 	onClose,
 	onConfirm,
+	onLoginRequired,
 }: AddToCartModalProps) {
 	const [quantity, setQuantity] = useState(1)
 	const [isSubmitting, setIsSubmitting] = useState(false)
@@ -62,9 +65,19 @@ function AddToCartModal({
 			setIsSubmitting(true)
 			setError('')
 			await onConfirm(quantity)
+			toast.success('Đã thêm vào giỏ hàng')
 			onClose()
 		} catch (apiError) {
-			setError(apiError instanceof Error ? apiError.message : 'Không thể thêm vào giỏ hàng')
+			const errorMessage = apiError instanceof Error ? apiError.message : 'Không thể thêm vào giỏ hàng'
+			
+			// Check if it's a login error
+			if (errorMessage.includes('đăng nhập') || errorMessage.includes('Vui lòng')) {
+				toast.error(errorMessage)
+				onLoginRequired?.()
+				onClose()
+			} else {
+				setError(errorMessage)
+			}
 		} finally {
 			setIsSubmitting(false)
 		}

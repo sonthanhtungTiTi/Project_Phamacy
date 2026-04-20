@@ -117,7 +117,7 @@ router.get('/order-status/:orderId', async (req, res) => {
     const { orderId } = req.params;
 
     const order = await Order.findById(orderId).select(
-      'paymentStatus paymentMethod transactionId'
+      'orderCode totalAmount paymentStatus paymentMethod transactionId paymentDate updatedAt'
     );
 
     if (!order) {
@@ -126,9 +126,13 @@ router.get('/order-status/:orderId', async (req, res) => {
 
     res.json({
       orderId: orderId,
+      orderCode: order.orderCode,
+      totalAmount: order.totalAmount,
       paymentStatus: order.paymentStatus, // 'unpaid' | 'pending' | 'paid' | 'failed'
       paymentMethod: order.paymentMethod,
       transactionId: order.transactionId,
+      paymentDate: order.paymentDate,
+      updatedAt: order.updatedAt,
     });
   } catch (error) {
     console.error('Get order status error:', error.message);

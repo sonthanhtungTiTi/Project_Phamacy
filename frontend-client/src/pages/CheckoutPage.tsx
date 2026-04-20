@@ -112,6 +112,11 @@ function CheckoutPage({ onBackToCart, onBackHome }: CheckoutPageProps) {
 		null
 
 	const canSubmit = Boolean(selectedCheckoutAddress?.id) && isSelectionValid && !isSubmitting
+	const submitButtonLabel = isSubmitting
+		? 'Dang xu ly...'
+		: paymentMethod === 'momo'
+			? 'Thanh toan bang QR MoMo'
+			: 'Xac nhan dat hang'
 
 	const handleBackToCart = () => {
 		if (onBackToCart) {
@@ -171,14 +176,14 @@ function CheckoutPage({ onBackToCart, onBackHome }: CheckoutPageProps) {
 				} catch (momoError) {
 					console.error('Momo redirect error:', momoError)
 					const momoMessage = momoError instanceof Error ? momoError.message : 'Khong tao duoc lien ket thanh toan Momo'
-					setSubmitError(`${momoMessage}. Don hang ${order.orderCode} da duoc tao, vui long thu lai thanh toan Momo.`)
+					setSubmitError(`${momoMessage}. Đơn hàng ${order.orderCode} đã được tạo, vui lòng thử lại thanh toán Momo.`)
 					return
 				}
 			}
 
 			sessionStorage.removeItem(CHECKOUT_SELECTED_IDS_KEY)
 			await refreshCart()
-			setSubmitSuccess(`Dat hang thanh cong. Ma don hang: ${order.orderCode}`)
+			setSubmitSuccess(`Đặt hàng thành công. Mã đơn hàng: ${order.orderCode}`)
 		} catch (apiError) {
 			setSubmitError(apiError instanceof Error ? apiError.message : 'Khong the thanh toan')
 		} finally {
@@ -386,7 +391,7 @@ function CheckoutPage({ onBackToCart, onBackHome }: CheckoutPageProps) {
 						disabled={!canSubmit}
 						className="mt-4 h-12 w-full rounded-xl bg-[#35b548] text-lg font-semibold text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:bg-[#9ca3af] disabled:hover:brightness-100"
 					>
-						{isSubmitting ? 'Dang xu ly...' : 'Xac nhan dat hang'}
+						{submitButtonLabel}
 					</button>
 
 					{!canSubmit && (

@@ -31,7 +31,7 @@ const getAuthHeaders = () => {
 	const accessToken = getAccessToken()
 
 	if (!accessToken) {
-		throw new Error('Vui long dang nhap de su dung gio hang')
+		throw new Error('Vui lòng đăng nhập để sử dụng giỏ hàng')
 	}
 
 	return {

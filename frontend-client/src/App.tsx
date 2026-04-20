@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import io, { Socket } from 'socket.io-client'
 import HomePage from './pages/HomePage'
 import Category from './pages/Category'
 import ProductDetail from './pages/ProductDetail'
@@ -8,6 +9,19 @@ import CartPage from './pages/CartPage'
 import CheckoutPage from './pages/CheckoutPage'
 import MomoResultPage from './pages/MomoResultPage'
 import ProfilePage from './pages/ProfilePage.tsx'
+import VideoCallOverlay from './components/calls/VideoCallComponent'
+import CallTargetSelector from './components/calls/CallTargetSelector'
+import FloatingContactButton from './components/ui/FloatingContactButton'
+import { useWebRTCCall } from './hooks/useWebRTCCall'
+import type { IncomingCallData } from './hooks/useWebRTCCall'
+
+const SOCKET_URL = (() => {
+  const explicitSocketUrl = import.meta.env.VITE_SOCKET_URL?.replace(/\/$/, '')
+  if (explicitSocketUrl) return explicitSocketUrl
+
+  const apiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/$/, '')
+  return apiUrl.endsWith('/api') ? apiUrl.slice(0, -4) : apiUrl
+})()
 
 const getProductIdFromPath = () => {
   const match = window.location.pathname.match(/^\/product\/([^/]+)$/)
@@ -39,6 +53,134 @@ function App() {
   const [isMomoResultPage, setIsMomoResultPage] = useState(isMomoResultPagePath())
   const [isProfilePage, setIsProfilePage] = useState(isProfilePagePath())
   const [activeHealthNewsId, setActiveHealthNewsId] = useState(getHealthNewsIdFromPath())
+
+  // ==================== CALL TARGET SELECTOR ====================
+  const [showCallSelector, setShowCallSelector] = useState(false)
+
+  // ==================== SOCKET.IO CONNECTION ====================
+  const [socket, setSocket] = useState<Socket | null>(null)
+  const socketRef = useRef<Socket | null>(null)
+
+  // Get user info from localStorage
+  const getUserInfo = useCallback(() => {
+    try {
+      const userStr = localStorage.getItem('clientUser')
+      if (userStr) return JSON.parse(userStr)
+    } catch { /* ignore */ }
+    return null
+  }, [])
+
+  const [user, setUser] = useState(getUserInfo())
+
+  // Initialize Socket.IO
+  useEffect(() => {
+    const token = localStorage.getItem('clientAccessToken')
+    if (!token) return
+
+    const userInfo = getUserInfo()
+    setUser(userInfo)
+
+    const newSocket = io(SOCKET_URL, {
+      auth: { token },
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: 5,
+      transports: ['websocket', 'polling'],
+    })
+
+    newSocket.on('connect', () => {
+      console.log('✅ Socket connected:', newSocket.id)
+    })
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('❌ Socket disconnected:', reason)
+    })
+
+    socketRef.current = newSocket
+    setSocket(newSocket)
+
+    return () => {
+      newSocket.disconnect()
+      socketRef.current = null
+    }
+  }, [getUserInfo])
+
+  // ==================== WEBRTC CALL HOOK ====================
+  const [callDuration, setCallDuration] = useState(0)
+  const [callPeerName, setCallPeerName] = useState('Người dùng')
+  const [callPeerAvatar, setCallPeerAvatar] = useState<string | undefined>(undefined)
+  const durationRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const {
+    phase: callPhase,
+    callType,
+    incomingCall,
+    localStream,
+    remoteStream,
+    isMuted,
+    isVideoOn,
+    initiateCall,
+    answerCall,
+    rejectCall,
+    endCall,
+    toggleAudio,
+    toggleVideo,
+  } = useWebRTCCall(socket, user, {
+    onPhaseChange: (newPhase) => {
+      if (newPhase === 'connected') {
+        setCallDuration(0)
+        durationRef.current = setInterval(() => {
+          setCallDuration((prev) => prev + 1)
+        }, 1000)
+      } else if (newPhase === 'idle') {
+        if (durationRef.current) {
+          clearInterval(durationRef.current)
+          durationRef.current = null
+        }
+        setCallDuration(0)
+        setCallPeerName('Người dùng')
+        setCallPeerAvatar(undefined)
+      }
+    },
+    onIncomingCall: (data: IncomingCallData) => {
+      console.log('📞 Incoming call:', data)
+      setCallPeerName(data.callerName || 'Người dùng')
+      setCallPeerAvatar(data.callerAvatarUrl)
+    },
+  })
+
+  // Cleanup duration timer
+  useEffect(() => {
+    return () => {
+      if (durationRef.current) {
+        clearInterval(durationRef.current)
+      }
+    }
+  }, [])
+
+  // Listen for call events from other components (ConsultPharmacy page)
+  useEffect(() => {
+    const handleOpenCallSelector = () => {
+      setShowCallSelector(true)
+    }
+
+    window.addEventListener('client:open-call-selector', handleOpenCallSelector)
+    return () => {
+      window.removeEventListener('client:open-call-selector', handleOpenCallSelector)
+    }
+  }, [])
+
+  // Handle selecting a call target from the modal
+  const handleSelectCallTarget = (staffId: string, staffName: string, staffAvatar: string, callType: 'video' | 'voice') => {
+    setCallPeerName(staffName)
+    setCallPeerAvatar(staffAvatar || undefined)
+    initiateCall(staffId, staffName, callType)
+  }
+
+  // Get peer info for call overlay
+  const peerName = incomingCall?.callerName || callPeerName
+  const peerAvatarUrl = incomingCall?.callerAvatarUrl || callPeerAvatar
 
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -72,10 +214,7 @@ function App() {
   }, [activeHealthNewsId])
 
   const openProductDetail = (productId: string) => {
-    if (!productId) {
-      return
-    }
-
+    if (!productId) return
     const nextPath = `/product/${encodeURIComponent(productId)}`
     window.history.pushState({}, '', nextPath)
     setActiveProductId(productId)
@@ -88,10 +227,7 @@ function App() {
   }
 
   const openCategory = (categoryId: string) => {
-    if (!categoryId) {
-      return
-    }
-
+    if (!categoryId) return
     const nextPath = `/category/${encodeURIComponent(categoryId)}`
     window.history.pushState({}, '', nextPath)
     setActiveCategoryId(categoryId)
@@ -115,10 +251,7 @@ function App() {
   }
 
   const openHealthNewsPage = (newsId: string) => {
-    if (!newsId) {
-      return
-    }
-
+    if (!newsId) return
     window.history.pushState({}, '', `/ban-tin-suc-khoe/${encodeURIComponent(newsId)}`)
     setActiveProductId('')
     setActiveCategoryId('')
@@ -140,59 +273,159 @@ function App() {
     setActiveHealthNewsId('')
   }
 
+  // Floating button handler — open call target selector
+  const handleFloatingCall = () => {
+    setShowCallSelector(true)
+  }
+
+  const handleFloatingZaloChat = () => {
+    window.open('https://zalo.me/0398668953', '_blank', 'noopener,noreferrer')
+  }
+
+  // ==================== SHARED OVERLAYS ====================
+  const renderCallOverlays = () => (
+    <>
+      {/* Call target selector modal */}
+      <CallTargetSelector
+        isOpen={showCallSelector}
+        onClose={() => setShowCallSelector(false)}
+        onSelectTarget={handleSelectCallTarget}
+        socket={socket}
+      />
+
+      {/* Active call overlay */}
+      {callPhase !== 'idle' && (
+        <VideoCallOverlay
+          phase={callPhase}
+          callType={callType}
+          peerName={peerName}
+          peerAvatarUrl={peerAvatarUrl}
+          durationSec={callDuration}
+          isMuted={isMuted}
+          isVideoOn={isVideoOn}
+          onMicToggle={toggleAudio}
+          onVideoToggle={toggleVideo}
+          onAnswer={answerCall}
+          onReject={rejectCall}
+          onHangup={endCall}
+          localStream={localStream}
+          remoteStream={remoteStream}
+        />
+      )}
+    </>
+  )
+
+  const renderFloatingButton = () => (
+    <FloatingContactButton
+      onVideoCall={handleFloatingCall}
+      onVoiceCall={handleFloatingCall}
+      onZaloChat={handleFloatingZaloChat}
+    />
+  )
+
+  // ==================== RENDER PAGES ====================
+
   if (activeProductId) {
-    return <ProductDetail productId={activeProductId} onBackHome={backHome} />
+    return (
+      <>
+        {renderCallOverlays()}
+        <ProductDetail productId={activeProductId} onBackHome={backHome} onOpenConsultPage={openConsultPage} />
+        {renderFloatingButton()}
+      </>
+    )
   }
 
   if (activeCategoryId) {
     return (
-      <Category
-        categoryId={activeCategoryId}
-        onBackHome={backHome}
-        onOpenProductDetail={openProductDetail}
-      />
+      <>
+        {renderCallOverlays()}
+        <Category
+          categoryId={activeCategoryId}
+          onBackHome={backHome}
+          onOpenProductDetail={openProductDetail}
+        />
+        {renderFloatingButton()}
+      </>
     )
   }
 
   if (isConsultPage) {
-    return <ConsultPharmacy onBackHome={backHome} />
+    return (
+      <>
+        {renderCallOverlays()}
+        <ConsultPharmacy onBackHome={backHome} />
+        {renderFloatingButton()}
+      </>
+    )
   }
 
   if (isCartPage) {
-    return <CartPage onBackHome={backHome} />
+    return (
+      <>
+        {renderCallOverlays()}
+        <CartPage onBackHome={backHome} />
+        {renderFloatingButton()}
+      </>
+    )
   }
 
   if (isCheckoutPage) {
     return (
-      <CheckoutPage
-        onBackToCart={() => {
-          window.history.pushState({}, '', '/gio-hang')
-          window.dispatchEvent(new PopStateEvent('popstate'))
-        }}
-        onBackHome={backHome}
-      />
+      <>
+        {renderCallOverlays()}
+        <CheckoutPage
+          onBackToCart={() => {
+            window.history.pushState({}, '', '/gio-hang')
+            window.dispatchEvent(new PopStateEvent('popstate'))
+          }}
+          onBackHome={backHome}
+        />
+        {renderFloatingButton()}
+      </>
     )
   }
 
   if (isMomoResultPage) {
-    return <MomoResultPage />
+    return (
+      <>
+        {renderCallOverlays()}
+        <MomoResultPage />
+        {renderFloatingButton()}
+      </>
+    )
   }
 
   if (isProfilePage) {
-    return <ProfilePage onBackHome={backHome} />
+    return (
+      <>
+        {renderCallOverlays()}
+        <ProfilePage onBackHome={backHome} />
+        {renderFloatingButton()}
+      </>
+    )
   }
 
   if (activeHealthNewsId) {
-    return <HealthNewsDetail newsId={activeHealthNewsId} onBackHome={backHome} />
+    return (
+      <>
+        {renderCallOverlays()}
+        <HealthNewsDetail newsId={activeHealthNewsId} onBackHome={backHome} />
+        {renderFloatingButton()}
+      </>
+    )
   }
 
   return (
-    <HomePage
-      onOpenProductDetail={openProductDetail}
-      onOpenCategory={openCategory}
-      onOpenConsultPage={openConsultPage}
-      onOpenHealthNews={openHealthNewsPage}
-    />
+    <>
+      {renderCallOverlays()}
+      <HomePage
+        onOpenProductDetail={openProductDetail}
+        onOpenCategory={openCategory}
+        onOpenConsultPage={openConsultPage}
+        onOpenHealthNews={openHealthNewsPage}
+      />
+      {renderFloatingButton()}
+    </>
   )
 }
 

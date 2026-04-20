@@ -60,6 +60,11 @@ function ProductCard({
 		setAddResultMessage('Đã thêm vào giỏ thuốc')
 	}
 
+	const handleLoginRequired = () => {
+		// Trigger auth modal opening through event
+		window.dispatchEvent(new CustomEvent('requestAuth'))
+	}
+
 	return (
 		<article
 			data-product-code={productCode || ''}
@@ -130,6 +135,7 @@ function ProductCard({
 				saleLabel={sale}
 				onClose={() => setIsAddModalOpen(false)}
 				onConfirm={handleConfirmAddToCart}
+				onLoginRequired={handleLoginRequired}
 			/>
 		</article>
 	)

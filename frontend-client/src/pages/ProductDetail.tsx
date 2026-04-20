@@ -179,6 +179,11 @@ function ProductDetail({ productId, onBackHome }: ProductDetailProps) {
 		setAddToCartMessage('Đã thêm vào giỏ thuốc')
 	}
 
+	const handleLoginRequired = () => {
+		// Trigger auth modal opening through event
+		window.dispatchEvent(new CustomEvent('requestAuth'))
+	}
+
 	return (
 		<PharmacyLayout categories={categories} hideSidebar>
 			<div className="mb-1">
@@ -287,8 +292,7 @@ function ProductDetail({ productId, onBackHome }: ProductDetailProps) {
 								productName={product.productName}
 								priceLabel={product.price}
 								onClose={() => setIsAddModalOpen(false)}
-								onConfirm={handleAddToCart}
-							/>
+								onConfirm={handleAddToCart}							onLoginRequired={handleLoginRequired}							/>
 							<p className="mt-3 text-sm text-slate-500">Tư vấn từ 8:00 - 21:30</p>
 						</section>
 

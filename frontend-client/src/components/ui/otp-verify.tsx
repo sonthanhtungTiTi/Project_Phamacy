@@ -122,7 +122,7 @@ function OtpVerify({ initialEmail = '', onBack, onVerified }: OtpVerifyProps) {
 					onClick={onBack}
 					className="mb-4 text-sm font-semibold text-[#1f9542] hover:underline"
 				>
-					Quay lai dang nhap
+					Quay lại đăng nhập
 				</button>
 
 				<form className="space-y-3" onSubmit={handleSendOtp}>
@@ -160,21 +160,21 @@ function OtpVerify({ initialEmail = '', onBack, onVerified }: OtpVerifyProps) {
 					}}
 					className="mb-4 text-sm font-semibold text-[#1f9542] hover:underline"
 				>
-					Nhap lai email
+					Nhập lại email
 				</button>
 
 				<form className="space-y-3" onSubmit={handleVerifyOtp}>
 					<p className="rounded-xl bg-[#f2f6f3] px-4 py-3 text-xs text-slate-600">
-						OTP da duoc gui den {maskedEmail || email}
+						OTP đã được gửi đến {maskedEmail || email}
 					</p>
 
 					<label className="block">
-						<span className="mb-1 block text-sm font-medium text-slate-600">Nhap OTP</span>
-						<input
-							type="text"
-							value={otp}
-							onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
-							placeholder="Nhap ma OTP 6 chu so"
+					<span className="mb-1 block text-sm font-medium text-slate-600">Nhập OTP</span>
+					<input
+						type="text"
+						value={otp}
+						onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
+						placeholder="Nhập mã OTP 6 chữ số"
 							className="h-11 w-full rounded-xl border border-slate-200 px-4 text-sm outline-none transition focus:border-[#72d27a]"
 						/>
 					</label>
@@ -184,7 +184,7 @@ function OtpVerify({ initialEmail = '', onBack, onVerified }: OtpVerifyProps) {
 						disabled={isVerifyingOtp}
 						className="mt-1 h-11 w-full rounded-xl bg-[linear-gradient(120deg,#25a53e,#47c95a)] text-sm font-bold text-white shadow-[0_10px_24px_rgba(37,165,62,0.28)] transition hover:brightness-105"
 					>
-						{isVerifyingOtp ? 'Dang xac nhan...' : 'Xac nhan OTP'}
+						{isVerifyingOtp ? 'Đang xác nhận...' : 'Xác nhận OTP'}
 					</button>
 				</form>
 			</>
@@ -199,29 +199,29 @@ function OtpVerify({ initialEmail = '', onBack, onVerified }: OtpVerifyProps) {
 					onClick={() => setStep('otp')}
 					className="mb-4 text-sm font-semibold text-[#1f9542] hover:underline"
 				>
-					Quay lai OTP
+					Quay lại OTP
 				</button>
 
 				<form className="space-y-3" onSubmit={handleResetPassword}>
 					<p className="rounded-xl bg-[#f2f6f3] px-4 py-3 text-xs text-slate-600">
-						OTP da xac nhan cho {maskedEmail || email}
+						OTP đã xác nhận cho {maskedEmail || email}
 					</p>
 
 					<label className="block">
-						<span className="mb-1 block text-sm font-medium text-slate-600">Mat khau moi</span>
-						<div className="relative">
-							<input
-								type={showNewPassword ? 'text' : 'password'}
-								value={newPassword}
-								onChange={(event) => setNewPassword(event.target.value)}
-								placeholder="Nhap mat khau moi"
+					<span className="mb-1 block text-sm font-medium text-slate-600">Mật khẩu mới</span>
+					<div className="relative">
+						<input
+							type={showNewPassword ? 'text' : 'password'}
+							value={newPassword}
+							onChange={(event) => setNewPassword(event.target.value)}
+							placeholder="Nhập mật khẩu mới"
 								className="h-11 w-full rounded-xl border border-slate-200 px-4 pr-11 text-sm outline-none transition focus:border-[#72d27a]"
 							/>
 							<button
 								type="button"
 								onClick={() => setShowNewPassword((prev) => !prev)}
 								className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-slate-500 transition hover:text-slate-700"
-								aria-label={showNewPassword ? 'An mat khau moi' : 'Hien mat khau moi'}
+							aria-label={showNewPassword ? 'Ẩn mật khẩu mới' : 'Hiện mật khẩu mới'}
 							>
 								{showNewPassword ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
 							</button>
@@ -229,20 +229,20 @@ function OtpVerify({ initialEmail = '', onBack, onVerified }: OtpVerifyProps) {
 					</label>
 
 					<label className="block">
-						<span className="mb-1 block text-sm font-medium text-slate-600">Nhap lai mat khau moi</span>
-						<div className="relative">
-							<input
-								type={showConfirmPassword ? 'text' : 'password'}
-								value={confirmPassword}
-								onChange={(event) => setConfirmPassword(event.target.value)}
-								placeholder="Nhap lai mat khau moi"
+					<span className="mb-1 block text-sm font-medium text-slate-600">Nhập lại mật khẩu mới</span>
+					<div className="relative">
+						<input
+							type={showConfirmPassword ? 'text' : 'password'}
+							value={confirmPassword}
+							onChange={(event) => setConfirmPassword(event.target.value)}
+							placeholder="Nhập lại mật khẩu mới"
 								className="h-11 w-full rounded-xl border border-slate-200 px-4 pr-11 text-sm outline-none transition focus:border-[#72d27a]"
 							/>
 							<button
 								type="button"
 								onClick={() => setShowConfirmPassword((prev) => !prev)}
 								className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-slate-500 transition hover:text-slate-700"
-								aria-label={showConfirmPassword ? 'An nhap lai mat khau moi' : 'Hien nhap lai mat khau moi'}
+							aria-label={showConfirmPassword ? 'Ẩn nhập lại mật khẩu mới' : 'Hiện nhập lại mật khẩu mới'}
 							>
 								{showConfirmPassword ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
 							</button>

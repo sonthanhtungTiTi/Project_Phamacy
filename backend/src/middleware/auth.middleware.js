@@ -124,8 +124,32 @@ const authorizeAdmin = (req, res, next) => {
 	next()
 }
 
+const authorizeStaff = (req, res, next) => {
+	if (!req.auth?.userId) {
+		return res.status(401).json({
+			success: false,
+			message: 'Unauthorized',
+			error: 'Authentication context is missing',
+		})
+	}
+
+	// Các role được phép: admin, pharmacist, warehouse_staff, sales_staff, manager
+	const allowedRoles = ['admin', 'pharmacist', 'warehouse_staff', 'sales_staff', 'manager']
+
+	if (!allowedRoles.includes(req.auth.role)) {
+		return res.status(403).json({
+			success: false,
+			message: 'Forbidden',
+			error: 'Staff permission is required',
+		})
+	}
+
+	next()
+}
+
 module.exports = {
 	authenticateClientJwt,
 	authorizeSelfOrAdmin,
 	authorizeAdmin,
+	authorizeStaff,
 }

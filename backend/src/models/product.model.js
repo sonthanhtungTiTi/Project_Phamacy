@@ -44,8 +44,9 @@ const productSchema = new mongoose.Schema(
 			required: true,
 		},
 		price: {
-			type: String,
+			type: Number,
 			required: true,
+			min: 0,
 		},
 		usageSummary: {
 			type: String,
@@ -143,8 +144,13 @@ const productSchema = new mongoose.Schema(
 	},
 	{
 		timestamps: true,
-		collection: 'medicines',
+		collection: 'products',
 	},
 )
+
+// Add indexes for better query performance
+productSchema.index({ isActive: 1 })
+productSchema.index({ categoryId: 1 })
+productSchema.index({ productName: 'text', medicineName: 'text' })
 
 module.exports = mongoose.models.Product || mongoose.model('Product', productSchema)

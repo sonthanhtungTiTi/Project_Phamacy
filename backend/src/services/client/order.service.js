@@ -39,6 +39,8 @@ const serializeOrder = (orderDoc) => ({
 	status: orderDoc.status,
 	paymentMethod: orderDoc.paymentMethod,
 	paymentStatus: orderDoc.paymentStatus,
+	transactionId: orderDoc.transactionId || null,
+	paymentDate: orderDoc.paymentDate || null,
 	totalQuantity: orderDoc.totalQuantity,
 	totalAmount: orderDoc.totalAmount,
 	note: orderDoc.note || '',

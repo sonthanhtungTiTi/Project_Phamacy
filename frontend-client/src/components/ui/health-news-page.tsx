@@ -65,27 +65,27 @@ function HealthNewsPage({
 				onClick={openHome}
 				className="fixed bottom-5 right-5 z-20 rounded-full bg-[#2aa443] px-4 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-[#218a37]"
 			>
-				Back ve trang chu
+				Back về trang chủ
 			</button>
 
 			<section className="rounded-2xl bg-white p-4 shadow-sm md:p-6">
 				<div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
 					<button type="button" onClick={openHome} className="font-semibold text-[#2aa443] hover:text-[#1f8a36]">
-						Nha thuoc T&Q
+						Nhà thuoc T&Q
 					</button>
 					<span>/</span>
-					<span>Ban tin suc khoe</span>
+					<span>Bản tin sức khoẻ</span>
 				</div>
 
 				<h1 className="mt-3 text-2xl font-extrabold leading-tight text-slate-900 md:text-3xl">{title}</h1>
 
 				<div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-600">
-					<p>Cap nhat: {updatedAt}</p>
-					<p>Luot xem: {formatViewCount(views)}</p>
+					<p>Cập nhật: {updatedAt}</p>
+					<p>Lượt xem: {formatViewCount(views)}</p>
 				</div>
 
 				<div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-					<p className="text-sm font-semibold text-slate-700">Tom tat nhanh</p>
+					<p className="text-sm font-semibold text-slate-700">Tóm tắt nhanh</p>
 					<p className="mt-2 text-[15px] leading-6 text-slate-700">{summary}</p>
 				</div>
 

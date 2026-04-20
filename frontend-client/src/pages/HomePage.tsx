@@ -7,13 +7,13 @@ import { getProducts, type ProductItem } from '../services/product.service'
 import { getHealthNews, type HealthNewsBlock } from '../services/healthNews.service'
 
 const quickActions = [
-	{ label: 'Mua thuoc, tu van', icon: 'RX', openConsultPage: true },
-	{ label: 'Tu thuoc gia dinh', icon: 'GD' },
-	{ label: 'Tra cuu chinh hang', icon: 'CH' },
-	{ label: 'Don hang cua toi', icon: 'DH' },
-	{ label: 'Dat lich kham benh', icon: 'LK' },
-	{ label: 'Kiem tra suc khoe', icon: 'SK' },
-	{ label: 'Doi tac nha thuoc', icon: 'DT' },
+	{ label: 'Mua thuốc, tư vấn', icon: 'RX', openConsultPage: true },
+	{ label: 'Tủ thuốc gia đình', icon: 'GD' },
+	{ label: 'Tra cứu chính hãng', icon: 'CH' },
+	{ label: 'Đơn hàng của tôi', icon: 'DH' },
+	{ label: 'Đặt lịch khám bệnh', icon: 'LK' },
+	{ label: 'Kiểm tra sức khỏe', icon: 'SK' },
+	{ label: 'Đối tác nhà thuốc', icon: 'DT' },
 ]
 
 const heroBanners = [
@@ -30,11 +30,11 @@ const heroBanners = [
 ]
 
 const trustTags = [
-	'Cam ket nguon goc',
-	'Khong tinh phi cat lieu',
-	'Tu van dung thuoc, dung lieu',
-	'100% hang chinh hang',
-	'Minh bach gia va nguon goc',
+	'Cam kết nguồn gốc',
+	'Không tính phí cắt liều',
+	'Tư vấn dùng thuốc, đúng liều',
+	'100% hàng chính hãng',
+	'Minh bạch giá và nguồn gốc',
 ]
 
 const extractFirstImage = (images: string) => {

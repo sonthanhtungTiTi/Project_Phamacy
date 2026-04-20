@@ -56,6 +56,34 @@ function PharmacyLayout({
 		}
 	}, [])
 
+	useEffect(() => {
+		const handleAuthRequest = () => {
+			setIsAuthOpen(true)
+		}
+
+		window.addEventListener('requestAuth', handleAuthRequest)
+		return () => window.removeEventListener('requestAuth', handleAuthRequest)
+	}, [])
+
+	useEffect(() => {
+		const handleStorage = (event: StorageEvent) => {
+			if (event.key === 'clientUser') {
+				if (event.newValue) {
+					try {
+						setAuthUser(JSON.parse(event.newValue) as AuthUser)
+					} catch {
+						setAuthUser(null)
+					}
+				} else {
+					setAuthUser(null)
+				}
+			}
+		}
+
+		window.addEventListener('storage', handleStorage)
+		return () => window.removeEventListener('storage', handleStorage)
+	}, [])
+
 	const handleLogout = () => {
 		localStorage.removeItem('clientAccessToken')
 		localStorage.removeItem('clientUser')

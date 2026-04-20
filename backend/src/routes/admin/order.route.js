@@ -1,15 +1,26 @@
 const express = require('express')
 
 const orderController = require('../../controllers/admin/order.controller')
-const { authenticateClientJwt, authorizeAdmin } = require('../../middleware/auth.middleware')
+const { authorize } = require('../../middleware/authorize.middleware')
+const { validate } = require('../../middleware/validate')
+const { ROLE_GROUPS } = require('../../constants/roles')
+const { orderQuerySchema, updateOrderStatusSchema } = require('../../validations/order.validation')
 
 const router = express.Router()
 
-router.use(authenticateClientJwt)
-router.use(authorizeAdmin)
+// Authorization: sales_staff, manager, admin có thể quản lý đơn hàng
+router.use(authorize(ROLE_GROUPS.ORDER_MANAGERS))
 
-router.get('/', orderController.listOrders)
+// GET /api/admin/orders — Danh sách đơn hàng
+router.get('/', validate(orderQuerySchema, 'query'), orderController.listOrders)
+
+// GET /api/admin/orders/:orderId — Chi tiết đơn hàng
 router.get('/:orderId', orderController.getOrderDetail)
-router.patch('/:orderId/status', orderController.updateOrderStatus)
+
+// PATCH /api/admin/orders/:orderId/status — Cập nhật trạng thái
+router.patch('/:orderId/status',
+	validate(updateOrderStatusSchema),
+	orderController.updateOrderStatus,
+)
 
 module.exports = router

@@ -1,71 +1,242 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import PharmacyLayout from '../components/layout/layout'
 import { checkOrderPaymentStatus, getOrderDetails } from '../services/momo.service'
+import type { OrderData } from '../services/order.service'
+
+type ResultViewStatus = 'loading' | 'success' | 'failed'
+
+interface MomoReturnParams {
+	orderId: string
+	resultCode: number | null
+	message: string
+	transId: string
+	responseTime: string
+	orderInfo: string
+	amount: number | null
+	payType: string
+}
+
+interface TransactionSnapshot {
+	orderId: string
+	orderCode: string
+	paymentStatus: string
+	paymentMethod: string
+	transactionId: string
+	paymentDate: string
+	updatedAt: string
+	amount: number | null
+	resultCode: number | null
+	message: string
+	orderInfo: string
+	payType: string
+}
+
+const parseMomoReturnParams = (): MomoReturnParams => {
+	const params = new URLSearchParams(window.location.search)
+	const amountParam = params.get('amount')
+	const resultCodeParam = params.get('resultCode')
+	const amountValue = amountParam !== null && amountParam !== '' ? Number(amountParam) : Number.NaN
+	const resultCodeValue =
+		resultCodeParam !== null && resultCodeParam !== '' ? Number(resultCodeParam) : Number.NaN
+
+	return {
+		orderId: params.get('orderId') || '',
+		resultCode: Number.isNaN(resultCodeValue) ? null : resultCodeValue,
+		message: params.get('message') || '',
+		transId: params.get('transId') || '',
+		responseTime: params.get('responseTime') || '',
+		orderInfo: params.get('orderInfo') || '',
+		amount: Number.isNaN(amountValue) ? null : amountValue,
+		payType: params.get('payType') || '',
+	}
+}
+
+const formatVnd = (value: number | null | undefined) => {
+	if (typeof value !== 'number' || Number.isNaN(value)) {
+		return '-'
+	}
+
+	return `${new Intl.NumberFormat('vi-VN').format(Math.max(0, Math.round(value)))}đ`
+}
+
+const formatDateTime = (value: string | null | undefined) => {
+	if (!value) {
+		return '-'
+	}
+
+	const numericValue = Number(value)
+	const maybeDate = Number.isNaN(numericValue) ? new Date(value) : new Date(numericValue)
+	if (Number.isNaN(maybeDate.getTime())) {
+		return '-'
+	}
+
+	return maybeDate.toLocaleString('vi-VN')
+}
+
+const paymentStatusLabel = (status: string) => {
+	if (status === 'paid') return 'Đã thanh toán'
+	if (status === 'failed') return 'Thanh toán thất bại'
+	if (status === 'pending') return 'Đang xử lý'
+	return 'Chưa thanh toán'
+}
 
 const MomoResultPage = () => {
-	const [paymentStatus, setPaymentStatus] = useState<'loading' | 'success' | 'failed'>('loading')
-	const [orderData, setOrderData] = useState<any>(null)
-	const [statusMessage, setStatusMessage] = useState('')
+	const [viewStatus, setViewStatus] = useState<ResultViewStatus>('loading')
+	const [orderData, setOrderData] = useState<OrderData | null>(null)
+	const [statusMessage, setStatusMessage] = useState('Đang xác nhận giao dịch MoMo...')
+	const [transactionSnapshot, setTransactionSnapshot] = useState<TransactionSnapshot | null>(null)
 
 	useEffect(() => {
 		const handleMomoReturn = async () => {
+			let shouldClearMomoOrderId = false
+
 			try {
-				// Parse query parameters từ Momo redirect
-				const params = new URLSearchParams(window.location.search)
-				const orderId = params.get('orderId') || sessionStorage.getItem('momoOrderId')
+				const momoReturnParams = parseMomoReturnParams()
+				const orderId = momoReturnParams.orderId || sessionStorage.getItem('momoOrderId') || ''
 
 				if (!orderId) {
-					setPaymentStatus('failed')
+					setViewStatus('failed')
 					setStatusMessage('Không tìm thấy thông tin đơn hàng')
 					return
 				}
 
-				// Poll payment status (Momo callback từ server mất vài giây)
-				let attempts = 0
-				const maxAttempts = 30 // Thử 30 lần (30 giây)
-				let isPaid = false
+				setTransactionSnapshot({
+					orderId,
+					orderCode: '',
+					paymentStatus: momoReturnParams.resultCode === 0 ? 'paid' : 'failed',
+					paymentMethod: momoReturnParams.payType || 'momo',
+					transactionId: momoReturnParams.transId,
+					paymentDate: momoReturnParams.responseTime,
+					updatedAt: '',
+					amount: momoReturnParams.amount,
+					resultCode: momoReturnParams.resultCode,
+					message: momoReturnParams.message,
+					orderInfo: momoReturnParams.orderInfo,
+					payType: momoReturnParams.payType,
+				})
 
-				while (attempts < maxAttempts && !isPaid) {
+				if (momoReturnParams.resultCode !== null && momoReturnParams.resultCode !== 0) {
+					setViewStatus('failed')
+					setStatusMessage(momoReturnParams.message || 'Thanh toán thất bại. Vui lòng thử lại.')
+					shouldClearMomoOrderId = true
+					return
+				}
+
+				if (momoReturnParams.resultCode === 0) {
+					setViewStatus('success')
+					setStatusMessage(
+						momoReturnParams.message ||
+							'Thanh toán MoMo thành công. Đơn hàng của bạn sẽ được đồng bộ trong giây lát.'
+					)
+					shouldClearMomoOrderId = true
+				}
+
+				// Ưu tiên hiển thị thông tin đơn hàng ngay khi quay về từ MoMo
+				try {
+					const orderDetails = await getOrderDetails(orderId)
+					const resolvedOrder = orderDetails?.data || null
+					setOrderData(resolvedOrder)
+					if (resolvedOrder) {
+						setTransactionSnapshot((prev) => ({
+							orderId,
+							orderCode: resolvedOrder.orderCode || prev?.orderCode || '',
+							paymentStatus:
+								momoReturnParams.resultCode === 0
+									? 'paid'
+									: (resolvedOrder.paymentStatus || prev?.paymentStatus || 'pending'),
+							paymentMethod:
+								resolvedOrder.paymentMethod || prev?.paymentMethod || momoReturnParams.payType || 'momo',
+							transactionId: resolvedOrder.transactionId || prev?.transactionId || momoReturnParams.transId,
+							paymentDate:
+								resolvedOrder.paymentDate || prev?.paymentDate || momoReturnParams.responseTime || '',
+							updatedAt: resolvedOrder.updatedAt || prev?.updatedAt || '',
+							amount:
+								typeof resolvedOrder.totalAmount === 'number'
+									? resolvedOrder.totalAmount
+									: (prev?.amount ?? momoReturnParams.amount),
+							resultCode: prev?.resultCode ?? momoReturnParams.resultCode,
+							message: prev?.message || momoReturnParams.message,
+							orderInfo: prev?.orderInfo || momoReturnParams.orderInfo,
+							payType: prev?.payType || momoReturnParams.payType,
+						}))
+					}
+				} catch {
+					// Có thể vừa thanh toán xong nên dữ liệu đơn chưa sync ngay.
+				}
+
+				let attempts = 0
+				const maxAttempts = 30
+				let isSettled = false
+				const momoReturnSuccess = momoReturnParams.resultCode === 0
+
+				while (attempts < maxAttempts && !isSettled) {
 					try {
 						const statusResult = await checkOrderPaymentStatus(orderId)
+						setTransactionSnapshot((prev) => ({
+							orderId,
+							orderCode: statusResult.orderCode || prev?.orderCode || '',
+							paymentStatus:
+								momoReturnSuccess
+									? 'paid'
+									: (statusResult.paymentStatus || prev?.paymentStatus || 'pending'),
+							paymentMethod: statusResult.paymentMethod || prev?.paymentMethod || 'momo',
+							transactionId: statusResult.transactionId || prev?.transactionId || '',
+							paymentDate: statusResult.paymentDate || prev?.paymentDate || '',
+							updatedAt: statusResult.updatedAt || prev?.updatedAt || '',
+							amount:
+								typeof statusResult.totalAmount === 'number'
+									? statusResult.totalAmount
+									: (prev?.amount ?? momoReturnParams.amount),
+							resultCode: prev?.resultCode ?? momoReturnParams.resultCode,
+							message: prev?.message || momoReturnParams.message,
+							orderInfo: prev?.orderInfo || momoReturnParams.orderInfo,
+							payType: prev?.payType || momoReturnParams.payType,
+						}))
 
 						if (statusResult.paymentStatus === 'paid') {
-							isPaid = true
-							setPaymentStatus('success')
+							isSettled = true
+							shouldClearMomoOrderId = true
+							setViewStatus('success')
 							setStatusMessage('Thanh toán Momo thành công! Đơn hàng của bạn đã được xác nhận.')
 
-							// Get full order details
 							const orderDetails = await getOrderDetails(orderId)
-							setOrderData(orderDetails.data || orderDetails)
+							const resolvedOrder = orderDetails?.data || null
+							setOrderData(resolvedOrder)
 							break
 						}
 
 						if (statusResult.paymentStatus === 'failed') {
-							setPaymentStatus('failed')
-							setStatusMessage('Thanh toán thất bại. Vui lòng thử lại.')
-							break
+							if (!momoReturnSuccess) {
+								isSettled = true
+								shouldClearMomoOrderId = true
+								setViewStatus('failed')
+								setStatusMessage('Thanh toán thất bại. Vui lòng thử lại.')
+								break
+							}
 						}
-					} catch (error) {
-						// Continue polling
+					} catch {
+						// Continue polling when callback has not updated yet.
 					}
 
 					attempts++
 					await new Promise((resolve) => setTimeout(resolve, 1000))
 				}
 
-				if (!isPaid && attempts >= maxAttempts) {
-					// Timeout - payment processing might still be happening
-					setPaymentStatus('loading')
+				if (!isSettled && attempts >= maxAttempts && !momoReturnSuccess) {
+					setViewStatus('loading')
 					setStatusMessage(
-						'Giao dịch đang xử lý. Vui lòng chờ hoặc quay lại trang chủ để kiểm tra đơn hàng.'
+						'Giao dịch đang xử lý trên hệ thống. Vui lòng kiểm tra lại trong mục đơn hàng của bạn.'
 					)
 				}
-
-				sessionStorage.removeItem('momoOrderId')
 			} catch (error) {
 				console.error('Error handling Momo return:', error)
-				setPaymentStatus('failed')
+				setViewStatus('failed')
 				setStatusMessage('Có lỗi xảy ra khi xử lý thanh toán.')
+				shouldClearMomoOrderId = true
+			} finally {
+				if (shouldClearMomoOrderId) {
+					sessionStorage.removeItem('momoOrderId')
+				}
 			}
 		}
 
@@ -77,97 +248,234 @@ const MomoResultPage = () => {
 	}
 
 	const handleBackOrders = () => {
-		window.location.href = '/profile#orders'
+		const orderId = orderData?.id || transactionSnapshot?.orderId || ''
+		if (orderId) {
+			window.location.href = `/profile?section=orders&orderId=${encodeURIComponent(orderId)}`
+			return
+		}
+
+		window.location.href = '/profile?section=orders'
 	}
+
+	const displayedAmount = useMemo(() => {
+		if (typeof orderData?.totalAmount === 'number') {
+			return orderData.totalAmount
+		}
+
+		return transactionSnapshot?.amount ?? null
+	}, [orderData?.totalAmount, transactionSnapshot?.amount])
+
+	const displayedPaymentStatus = useMemo(() => {
+		if (transactionSnapshot?.resultCode === 0) {
+			return 'paid'
+		}
+
+		return orderData?.paymentStatus || transactionSnapshot?.paymentStatus || 'pending'
+	}, [orderData?.paymentStatus, transactionSnapshot?.paymentStatus, transactionSnapshot?.resultCode])
+	const displayedTransactionId = orderData?.transactionId || transactionSnapshot?.transactionId || '-'
+	const displayedOrderCode = orderData?.orderCode || transactionSnapshot?.orderCode || '-'
+	const displayedPaymentTime =
+		orderData?.paymentDate ||
+		transactionSnapshot?.paymentDate ||
+		transactionSnapshot?.updatedAt ||
+		orderData?.updatedAt ||
+		''
 
 	return (
 		<PharmacyLayout categories={[]}>
-			<div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-				<div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
-					{paymentStatus === 'loading' && (
-						<>
-							<div className="flex justify-center mb-4">
-								<div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
-							</div>
-							<h1 className="text-2xl font-bold text-gray-800 mb-2">Đang xử lý</h1>
-							<p className="text-gray-600 mb-6">{statusMessage}</p>
-						</>
-					)}
-
-					{paymentStatus === 'success' && (
-						<>
-							<div className="flex justify-center mb-4">
-								<div
-									className="flex items-center justify-center w-12 h-12 rounded-full"
-									style={{ backgroundColor: '#35b548' }}
-								>
-									<svg
-										className="w-6 h-6 text-white"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
+			<div className="min-h-screen bg-slate-50 p-4 md:p-6">
+				<div className="mx-auto max-w-5xl space-y-4">
+					<div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+						<div
+							className={`grid grid-cols-1 gap-4 px-5 py-6 md:grid-cols-[1.25fr_1fr] md:px-6 ${
+								viewStatus === 'success'
+									? 'bg-[linear-gradient(120deg,#e8f9ee,#f8fffb)]'
+									: viewStatus === 'failed'
+										? 'bg-[linear-gradient(120deg,#fff1f2,#fff8f8)]'
+										: 'bg-[linear-gradient(120deg,#eff6ff,#f8fafc)]'
+							}`}
+						>
+							<div className="space-y-3">
+								<div className="flex items-center gap-3">
+									<div
+										className={`grid h-12 w-12 place-items-center rounded-full ${
+											viewStatus === 'success'
+												? 'bg-emerald-500 text-white'
+												: viewStatus === 'failed'
+													? 'bg-red-500 text-white'
+													: 'bg-blue-500 text-white'
+										}`}
 									>
-										<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-									</svg>
+										{viewStatus === 'success' ? (
+											<svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+												<path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+											</svg>
+										) : viewStatus === 'failed' ? (
+											<svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2">
+												<path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+											</svg>
+										) : (
+											<div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+										)}
+									</div>
+									<div>
+										<h1 className="text-2xl font-black text-slate-900">
+											{viewStatus === 'success'
+												? 'Thanh toán QR MoMo thành công'
+												: viewStatus === 'failed'
+													? 'Thanh toán MoMo thất bại'
+													: 'Đang xác nhận giao dịch MoMo'}
+										</h1>
+										<p className="mt-1 text-sm text-slate-600">{statusMessage}</p>
+									</div>
+								</div>
+
+								<div className="rounded-xl border border-white/70 bg-white/70 p-3 text-sm text-slate-700">
+									<p>
+										<span className="font-semibold">Mã đơn hàng:</span> {displayedOrderCode}
+									</p>
+									<p className="mt-1">
+										<span className="font-semibold">Mã giao dịch:</span> {displayedTransactionId}
+									</p>
+									<p className="mt-1">
+										<span className="font-semibold">Số tiền thanh toán:</span> {formatVnd(displayedAmount)}
+									</p>
 								</div>
 							</div>
-							<h1 className="text-2xl font-bold text-gray-800 mb-2">Thanh toán thành công</h1>
-							<p className="text-gray-600 mb-6">{statusMessage}</p>
-							{orderData && (
-								<div className="bg-gray-50 p-4 rounded-lg mb-6 text-left">
-									<p className="text-sm text-gray-600 mb-2">
-										<strong>Mã đơn hàng:</strong> {orderData.orderCode}
-									</p>
-									<p className="text-sm text-gray-600 mb-2">
-										<strong>Số tiền:</strong>{' '}
-										{new Intl.NumberFormat('vi-VN', {
-											style: 'currency',
-											currency: 'VND',
-										}).format(orderData.totalAmount)}
-									</p>
-									<p className="text-sm text-gray-600">
-										<strong>Trạng thái:</strong> <span style={{ color: '#35b548' }}>Đã thanh toán</span>
-									</p>
-								</div>
-							)}
-						</>
-					)}
 
-					{paymentStatus === 'failed' && (
-						<>
-							<div className="flex justify-center mb-4">
-								<div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-100">
-									<svg
-										className="w-6 h-6 text-red-600"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-									</svg>
+							<div className="flex items-center justify-center">
+								<div className="relative h-[170px] w-[170px]">
+									<div className="absolute inset-0 rounded-full bg-emerald-100" />
+									<div className="absolute inset-3 rounded-full border-2 border-emerald-300" />
+									<div className="absolute inset-6 rounded-full bg-white shadow-inner" />
+									<div className="absolute inset-0 grid place-items-center">
+										<div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center shadow-sm">
+											<p className="text-xs font-semibold text-slate-500">GIAO DỊCH</p>
+											<p className="mt-1 text-lg font-black text-slate-900">{viewStatus === 'success' ? 'THÀNH CÔNG' : viewStatus === 'failed' ? 'THẤT BẠI' : 'ĐANG XỬ LÝ'}</p>
+											<p className="mt-1 text-xs text-slate-500">MoMo QR Payment</p>
+										</div>
+									</div>
 								</div>
 							</div>
-							<h1 className="text-2xl font-bold text-gray-800 mb-2">Thanh toán thất bại</h1>
-							<p className="text-gray-600 mb-6">{statusMessage}</p>
-						</>
-					)}
+						</div>
 
-					<div className="flex gap-4">
+						<div className="grid grid-cols-1 gap-4 p-4 md:grid-cols-[1fr_360px] md:p-6">
+							<section className="rounded-xl border border-slate-200 bg-white">
+								<header className="border-b border-slate-200 px-4 py-3">
+									<h2 className="text-base font-bold text-slate-900">Chi tiết giao dịch</h2>
+								</header>
+								<div className="space-y-2 px-4 py-3 text-sm text-slate-700">
+									<div className="flex items-center justify-between gap-3">
+										<span className="text-slate-500">Trạng thái</span>
+										<span className={`font-semibold ${displayedPaymentStatus === 'paid' ? 'text-emerald-600' : displayedPaymentStatus === 'failed' ? 'text-red-600' : 'text-blue-600'}`}>
+											{paymentStatusLabel(displayedPaymentStatus)}
+										</span>
+									</div>
+									<div className="flex items-center justify-between gap-3">
+										<span className="text-slate-500">Mã giao dịch</span>
+										<span className="font-semibold">{displayedTransactionId}</span>
+									</div>
+									<div className="flex items-center justify-between gap-3">
+										<span className="text-slate-500">Mã đơn hàng</span>
+										<span className="font-semibold">{displayedOrderCode}</span>
+									</div>
+									<div className="flex items-center justify-between gap-3">
+										<span className="text-slate-500">Thời gian giao dịch</span>
+										<span className="font-semibold">{formatDateTime(displayedPaymentTime)}</span>
+									</div>
+									<div className="flex items-center justify-between gap-3">
+										<span className="text-slate-500">Phương thức</span>
+										<span className="font-semibold">{(orderData?.paymentMethod || transactionSnapshot?.paymentMethod || 'momo').toUpperCase()}</span>
+									</div>
+									<div className="flex items-center justify-between gap-3">
+										<span className="text-slate-500">Số tiền</span>
+										<span className="font-semibold text-slate-900">{formatVnd(displayedAmount)}</span>
+									</div>
+									<div className="flex items-center justify-between gap-3">
+										<span className="text-slate-500">Mã phản hồi</span>
+										<span className="font-semibold">{transactionSnapshot?.resultCode ?? '-'}</span>
+									</div>
+									<div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+										<p>
+											<span className="font-semibold">Thông báo:</span> {transactionSnapshot?.message || statusMessage}
+										</p>
+										{transactionSnapshot?.orderInfo && (
+											<p className="mt-1">
+												<span className="font-semibold">Nội dung:</span> {transactionSnapshot.orderInfo}
+											</p>
+										)}
+									</div>
+								</div>
+							</section>
+
+							<section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+								<h2 className="text-base font-bold text-slate-900">Tóm tắt đơn hàng</h2>
+								<div className="space-y-2 text-sm text-slate-700">
+									<div className="flex items-center justify-between">
+										<span className="text-slate-500">Số sản phẩm</span>
+										<span className="font-semibold">{orderData?.items?.length || 0}</span>
+									</div>
+									<div className="flex items-center justify-between">
+										<span className="text-slate-500">Tổng số lượng</span>
+										<span className="font-semibold">{orderData?.totalQuantity || 0}</span>
+									</div>
+									<div className="flex items-center justify-between border-t border-slate-200 pt-2">
+										<span className="text-slate-500">Tổng thanh toán</span>
+										<span className="text-base font-black text-emerald-600">{formatVnd(displayedAmount)}</span>
+									</div>
+								</div>
+
+								{orderData?.shippingAddress && (
+									<div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+										<p className="font-semibold text-slate-800">Thông tin nhận hàng</p>
+										<p className="mt-1">{orderData.shippingAddress.recipientName} - {orderData.shippingAddress.phone}</p>
+										<p className="mt-1">{orderData.shippingAddress.fullAddress}</p>
+									</div>
+								)}
+							</section>
+						</div>
+					</div>
+
+					{orderData?.items?.length ? (
+						<section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+							<header className="border-b border-slate-200 px-4 py-3 md:px-6">
+								<h2 className="text-base font-bold text-slate-900">Sản phẩm đã mua</h2>
+							</header>
+							<div className="divide-y divide-slate-100">
+								{orderData.items.map((item) => (
+									<div key={item.productId} className="grid grid-cols-1 gap-3 px-4 py-3 md:grid-cols-[80px_1fr_auto] md:px-6">
+										<div className="h-[72px] w-[72px] overflow-hidden rounded-lg bg-slate-100">
+											<img
+												src={item.productImage || 'https://via.placeholder.com/200x200?text=SP'}
+												alt={item.productName}
+												className="h-full w-full object-cover"
+											/>
+										</div>
+										<div>
+											<p className="text-sm font-bold text-slate-800">{item.productName}</p>
+											<p className="mt-1 text-xs text-slate-500">Mã thuốc: {item.medicineCode || '-'}</p>
+											<p className="mt-1 text-xs text-slate-600">Số lượng: {item.quantity} - Đơn giá: {formatVnd(item.unitPrice)}</p>
+										</div>
+										<p className="text-sm font-semibold text-slate-900">{formatVnd(item.lineTotal)}</p>
+									</div>
+								))}
+							</div>
+						</section>
+					) : null}
+
+					<div className="flex flex-wrap items-center gap-3">
 						<button
 							onClick={handleBackHome}
-							className="flex-1 px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+							className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
 						>
 							Về trang chủ
 						</button>
-						{paymentStatus === 'success' && (
-							<button
-								onClick={handleBackOrders}
-								className="flex-1 px-4 py-2 text-white rounded-lg transition"
-								style={{ backgroundColor: '#35b548' }}
-							>
-								Xem đơn hàng
-							</button>
-						)}
+						<button
+							onClick={handleBackOrders}
+							className="rounded-xl bg-[#35b548] px-4 py-2 text-sm font-semibold text-white transition hover:brightness-95"
+						>
+							Xem đơn hàng
+						</button>
 					</div>
 				</div>
 			</div>

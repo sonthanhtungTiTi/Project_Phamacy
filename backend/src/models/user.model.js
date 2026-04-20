@@ -50,7 +50,17 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
+      enum: ['customer', 'pharmacist', 'warehouse_staff', 'sales_staff', 'manager', 'admin', 'banned'],
       default: 'customer',
+    },
+    permissions: {
+      type: [String],
+      default: [],
+    },
+    department: {
+      type: String,
+      enum: ['warehouse', 'sales', 'pharmacy', 'management', null],
+      default: null,
     },
     isActive: {
       type: Boolean,
@@ -65,5 +75,10 @@ const userSchema = new mongoose.Schema(
     timestamps: true,
   },
 )
+
+// Indexes for role-based queries
+userSchema.index({ role: 1 })
+userSchema.index({ isActive: 1 })
+userSchema.index({ role: 1, isActive: 1 })
 
 module.exports = mongoose.model('User', userSchema)

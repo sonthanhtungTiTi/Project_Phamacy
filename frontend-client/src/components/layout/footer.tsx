@@ -1,35 +1,35 @@
 function Footer() {
 	const infoColumns = [
 		{
-			title: 'HE THONG NHA THUOC T&Q',
-			items: ['He thong 414 NHA THUOC T&Q', 'Noi quy NHA THUOC T&Q', 'Chat luong phuc vu'],
+		title: 'HỆ THỐNG NHÀ THUốC T&Q',
+		items: ['HỆ thống 414 NHÀ THUốC T&Q', 'Nội quy NHÀ THUốC T&Q', 'Chất lượng phục vụ'],
 		},
 		{
-			title: 'HO TRO KHACH HANG',
+			title: 'HỖ TRỢ KHÁCH HÀNG',
 			items: [
-				'Dieu kien giao dich chung',
-				'Huong dan mua hang online',
-				'Chinh sach giao hang',
-				'Chinh sach thanh toan',
-				'Chinh sach doi tra, bao hanh',
-				'Tich diem Qua tang VIP',
+				'Điều kiện giao dịch chung',
+				'Hướng dẫn mua hàng online',
+				'Chính sách giao hàng',
+				'Chính sách thanh toán',
+				'Chính sách đổi trả, bảo hành',
+				'Tích điểm Quà tặng VIP',
 			],
 		},
 		{
-			title: 'VE NHA THUOC T&Q ',
-			items: ['Gioi thieu cong ty', 'Ban Dieu hanh', 'Chinh sach xu ly du lieu ca nhan', 'Chinh sach cookies'],
+			title: 'VỀ NHÀ THUỐC T&Q ',
+			items: ['Giới thiệu công ty', 'Ban Điều hành', 'Chính sách xử lý dữ liệu cá nhân', 'Chính sách cookies'],
 		},
 		{
-			title: 'BENH VIEN',
-			items: ['Tat ca benh vien'],
+			title: 'BỆNH VIỆN',
+			items: ['Tất cả bệnh viện'],
 		},
 	]
 
 	const highlights = [
-		{ title: 'CAM KET 100%', desc: 'Thuoc chinh hang', symbol: 'CK' },
-		{ title: 'MIEN PHI GIAO HANG', desc: 'Don hang tu 150.000d', symbol: 'GH' },
-		{ title: 'GIAO NHANH 2 GIO', desc: 'Xem chi tiet', symbol: '2H' },
-		{ title: 'DOI TRA TRONG 30 NGAY', desc: 'Xem chi tiet', symbol: 'DT' },
+		{ title: 'CAM KẾT 100%', desc: 'Thuốc chính hãng', symbol: 'CK' },
+		{ title: 'MIỄN PHÍ GIAO HÀNG', desc: 'Đơn hàng từ 150.000đ', symbol: 'GH' },
+		{ title: 'GIAO NHANH 2 GIỜ', desc: 'Xem chi tiết', symbol: '2H' },
+		{ title: 'ĐỔI TRẢ TRONG 30 NGÀY', desc: 'Xem chi tiết', symbol: 'DT' },
 	]
 
 	return (

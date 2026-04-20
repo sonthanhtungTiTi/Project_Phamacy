@@ -1,298 +1,488 @@
-import React from 'react';
+import { useState, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import {
+  faArrowsRotate,
+  faChartLine,
+  faCircleCheck,
+  faFileInvoice,
+  faHourglassHalf,
+  faMoneyBillWave,
+  faTriangleExclamation,
+  faTrophy,
+  faUsers,
+} from '@fortawesome/free-solid-svg-icons'
+import Box from '@mui/material/Box'
+import ToggleButton from '@mui/material/ToggleButton'
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
+import Typography from '@mui/material/Typography'
+import { styled, useTheme } from '@mui/material/styles'
+import type { Theme } from '@mui/material/styles'
+import { BarChart } from '@mui/x-charts/BarChart'
+import { PieChart, pieClasses } from '@mui/x-charts/PieChart'
+import { useDrawingArea } from '@mui/x-charts/hooks'
+import { useAuthStore } from '../stores/authStore'
+import analyticsService from '../services/analytics.service'
+import type { DashboardStats, RecentOrder, LowStockProduct, RevenueDataPoint, TopProduct } from '../services/analytics.service'
+
+const ChartPanel = styled(Box)(({ theme }: { theme: Theme }) => ({
+  border: `1px solid ${theme.palette.grey[200]}`,
+  borderRadius: 12,
+  backgroundColor: theme.palette.common.white,
+  boxShadow: theme.shadows[1],
+  padding: theme.spacing(2.5),
+}))
+
+const PieCenterText = styled('text')(({ theme }) => ({
+  fill: theme.palette.text.primary,
+  textAnchor: 'middle',
+  dominantBaseline: 'central',
+  fontWeight: 700,
+}))
+
+function PieCenterLabel({ total }: { total: number }) {
+  const { width, height, left, top } = useDrawingArea()
+
+  return (
+    <>
+      <PieCenterText x={left + width / 2} y={top + height / 2 - 10} fontSize={28}>
+        {total}
+      </PieCenterText>
+      <PieCenterText x={left + width / 2} y={top + height / 2 + 14} fontSize={12} opacity={0.7}>
+        Đơn hàng
+      </PieCenterText>
+    </>
+  )
+}
 
 export default function Dashboard() {
+  const { user } = useAuthStore()
+  const theme = useTheme()
+  const navigate = useNavigate()
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([])
+  const [lowStock, setLowStock] = useState<LowStockProduct[]>([])
+  const [topProducts, setTopProducts] = useState<TopProduct[]>([])
+  const [revenueData, setRevenueData] = useState<RevenueDataPoint[]>([])
+  const [revenueDays, setRevenueDays] = useState<7 | 14 | 30>(7)
+  const [revenueLoading, setRevenueLoading] = useState(false)
+  const [revenueError, setRevenueError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    loadDashboard()
+  }, [])
+
+  useEffect(() => {
+    loadRevenueChart(revenueDays)
+  }, [revenueDays])
+
+  const loadDashboard = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [dashStats, orders, lowStockItems, topItems] = await Promise.all([
+        analyticsService.getDashboardStats(),
+        analyticsService.getRecentOrders(5),
+        analyticsService.getLowStockProducts(10),
+        analyticsService.getTopProducts(5),
+      ])
+      setStats(dashStats)
+      setRecentOrders(orders)
+      setLowStock(lowStockItems)
+      setTopProducts(topItems)
+    } catch (err: any) {
+      setError(err.message || 'Không thể tải dữ liệu dashboard')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadRevenueChart = async (days: 7 | 14 | 30) => {
+    setRevenueLoading(true)
+    setRevenueError(null)
+    try {
+      const chart = await analyticsService.getRevenueChart('daily', days)
+      setRevenueData(chart.data)
+    } catch (err: any) {
+      setRevenueData([])
+      setRevenueError(err.message || 'Không thể tải dữ liệu doanh thu theo ngày')
+    } finally {
+      setRevenueLoading(false)
+    }
+  }
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount)
+  }
+
+  const formatChartDate = (dateValue: string) => {
+    const parsed = new Date(dateValue)
+    if (Number.isNaN(parsed.getTime())) return dateValue
+    return parsed.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
+  }
+
+  const getStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      pending: 'bg-yellow-100 text-yellow-800',
+      confirmed: 'bg-blue-100 text-blue-800',
+      shipping: 'bg-purple-100 text-purple-800',
+      completed: 'bg-green-100 text-green-800',
+      cancelled: 'bg-red-100 text-red-800',
+    }
+    return colors[status] || 'bg-gray-100 text-gray-800'
+  }
+
+  const getStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      pending: 'Chờ xử lý',
+      confirmed: 'Đã xác nhận',
+      shipping: 'Đang giao',
+      completed: 'Hoàn thành',
+      cancelled: 'Đã hủy',
+    }
+    return labels[status] || status
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-500">Đang tải dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+        <p className="text-red-600 mb-4">{error}</p>
+        <button onClick={loadDashboard} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+          Thử lại
+        </button>
+      </div>
+    )
+  }
+
+  const statCards: Array<{ label: string; value: string; sub: string; icon: IconDefinition; borderColor: string }> = [
+    { label: 'DOANH THU HÔM NAY', value: formatCurrency(stats?.revenue.today || 0), sub: `Tháng: ${formatCurrency(stats?.revenue.thisMonth || 0)}`, icon: faMoneyBillWave, borderColor: 'border-l-green-500' },
+    { label: 'ĐƠN HÀNG HÔM NAY', value: String(stats?.orders.today || 0), sub: `Tháng: ${stats?.orders.thisMonth || 0} đơn`, icon: faFileInvoice, borderColor: 'border-l-blue-500' },
+    { label: 'KHÁCH HÀNG MỚI', value: String(stats?.users.newThisMonth || 0), sub: `Tổng: ${stats?.users.total || 0} người`, icon: faUsers, borderColor: 'border-l-purple-500' },
+    { label: 'CHỜ XỬ LÝ', value: String(stats?.orders.byStatus?.pending || 0), sub: `${stats?.orders.byStatus?.shipping || 0} đang giao`, icon: faHourglassHalf, borderColor: 'border-l-orange-500' },
+  ]
+
+  const revenueBarDataset = useMemo(
+    () => revenueData.map((point) => ({
+      label: formatChartDate(point.date),
+      revenue: point.revenue,
+    })),
+    [revenueData],
+  )
+
+  const orderStatusPieData = useMemo(() => {
+    const byStatus = stats?.orders.byStatus || {}
+    return [
+      { id: 1, value: byStatus.pending || 0, label: 'Chờ xử lý', color: '#f59e0b' },
+      { id: 2, value: byStatus.confirmed || 0, label: 'Đã xác nhận', color: '#3b82f6' },
+      { id: 3, value: byStatus.shipping || 0, label: 'Đang giao', color: '#8b5cf6' },
+      { id: 4, value: byStatus.completed || 0, label: 'Hoàn thành', color: '#22c55e' },
+      { id: 5, value: byStatus.cancelled || 0, label: 'Đã hủy', color: '#ef4444' },
+    ].filter((item) => item.value > 0)
+  }, [stats])
+
+  const topProductDataset = useMemo(
+    () => topProducts.slice(0, 5).map((item) => ({
+      name: item.productName.length > 24 ? `${item.productName.slice(0, 24)}...` : item.productName,
+      sold: item.totalSold,
+    })),
+    [topProducts],
+  )
+
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header Section */}
-      <div className="flex justify-between items-end mb-2">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-[28px] font-bold text-gray-900 mb-1">Dashboard Overview</h1>
-          <p className="text-gray-500 text-[15px]">Real-time monitoring of pharmacy performance and operations.</p>
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-gray-500 text-sm mt-1">Xin chào, {user?.fullName || 'Admin'}! Tổng quan hoạt động nhà thuốc.</p>
         </div>
-        <div className="flex gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 border border-gray-200 bg-white rounded-md text-gray-700 font-medium hover:bg-gray-50 transition-colors shadow-sm text-sm">
-            <i className="fa-regular fa-calendar-days text-gray-400"></i>
-            Last 30 Days
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-md font-medium hover:bg-primary-dark transition-colors shadow-sm text-sm">
-            <i className="fa-solid fa-download"></i>
-            Export Report
-          </button>
+        <button onClick={loadDashboard} className="px-4 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition flex items-center gap-2">
+          <FontAwesomeIcon icon={faArrowsRotate} /> Làm mới
+        </button>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        {statCards.map((card, idx) => (
+          <div key={idx} className={`bg-white rounded-lg p-5 shadow-sm border border-gray-200 border-l-4 ${card.borderColor}`}>
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{card.label}</p>
+                <p className="text-2xl font-bold text-gray-900 mt-2">{card.value}</p>
+                <p className="text-xs text-gray-500 mt-1">{card.sub}</p>
+              </div>
+              <FontAwesomeIcon icon={card.icon} className="text-3xl text-gray-500" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <div className="xl:col-span-2">
+          <ChartPanel>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                Doanh Thu Theo Ngày
+              </Typography>
+              <ToggleButtonGroup
+                size="small"
+                value={revenueDays}
+                exclusive
+                onChange={(_, value: 7 | 14 | 30 | null) => {
+                  if (value) setRevenueDays(value)
+                }}
+              >
+                <ToggleButton value={7}>7 ngày</ToggleButton>
+                <ToggleButton value={14}>14 ngày</ToggleButton>
+                <ToggleButton value={30}>30 ngày</ToggleButton>
+              </ToggleButtonGroup>
+            </div>
+
+            {revenueLoading ? (
+              <div className="h-[320px] flex items-center justify-center text-sm text-gray-500">Đang tải biểu đồ doanh thu...</div>
+            ) : revenueError ? (
+              <div className="h-[320px] flex items-center justify-center text-sm text-red-600">{revenueError}</div>
+            ) : revenueBarDataset.length === 0 ? (
+              <div className="h-[320px] flex items-center justify-center text-sm text-gray-500">Chưa có dữ liệu doanh thu trong khoảng thời gian này.</div>
+            ) : (
+              <BarChart
+                dataset={revenueBarDataset}
+                xAxis={[{ scaleType: 'band', dataKey: 'label', tickLabelStyle: { fontSize: 11 } }]}
+                yAxis={[{
+                  tickLabelStyle: { fontSize: 11 },
+                  valueFormatter: (value: number) => `${Math.round(Number(value) / 1000)}k`,
+                }]}
+                series={[{
+                  dataKey: 'revenue',
+                  label: 'Doanh thu (VND)',
+                  color: theme.palette.success.main,
+                  valueFormatter: (value) => formatCurrency(Number(value || 0)),
+                }]}
+                margin={{ top: 20, right: 20, bottom: 60, left: 80 }}
+                grid={{ horizontal: true }}
+                height={320}
+              />
+            )}
+          </ChartPanel>
+        </div>
+
+        <div className="xl:col-span-1">
+          <ChartPanel>
+            <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', mb: 1 }}>
+              Tỷ Trọng Trạng Thái Đơn
+            </Typography>
+            {orderStatusPieData.length === 0 ? (
+              <div className="h-[320px] flex items-center justify-center text-sm text-gray-500">Chưa có dữ liệu trạng thái đơn hàng.</div>
+            ) : (
+              <PieChart
+                height={320}
+                margin={{ top: 20, bottom: 20, left: 10, right: 120 }}
+                series={[{
+                  data: orderStatusPieData,
+                  innerRadius: 56,
+                  outerRadius: 98,
+                  paddingAngle: 3,
+                  cornerRadius: 4,
+                  cx: 120,
+                  cy: 150,
+                }]}
+                slotProps={{
+                  legend: {
+                    direction: 'vertical',
+                    position: { vertical: 'middle', horizontal: 'end' },
+                  },
+                }}
+                sx={{
+                  [`& .${pieClasses.series} path`]: {
+                    stroke: '#fff',
+                    strokeWidth: 1,
+                  },
+                }}
+              >
+                <PieCenterLabel total={stats?.orders.total || 0} />
+              </PieChart>
+            )}
+          </ChartPanel>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-4 gap-6">
-        {/* Total Orders */}
-        <div className="bg-white rounded-xl p-5 border-l-4 border-l-primary shadow-sm relative overflow-hidden">
-          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">Total Orders</p>
-          <div className="flex justify-between items-end mb-3">
-            <h2 className="text-3xl font-bold text-gray-800">1,284</h2>
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-              <i className="fa-solid fa-bag-shopping"></i>
-            </div>
-          </div>
-          <p className="text-sm font-medium text-success flex items-center gap-1">
-            <i className="fa-solid fa-arrow-trend-up text-xs"></i>
-            12% from last month
-          </p>
-        </div>
+      <ChartPanel>
+        <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', mb: 1 }}>
+          Sản Lượng Bán Theo Sản Phẩm
+        </Typography>
+        {topProductDataset.length === 0 ? (
+          <div className="h-[320px] flex items-center justify-center text-sm text-gray-500">Chưa có dữ liệu sản lượng sản phẩm.</div>
+        ) : (
+          <BarChart
+            dataset={topProductDataset}
+            layout="horizontal"
+            yAxis={[{ scaleType: 'band', dataKey: 'name', width: 170, tickLabelStyle: { fontSize: 11 } }]}
+            xAxis={[{ tickLabelStyle: { fontSize: 11 } }]}
+            series={[{
+              dataKey: 'sold',
+              label: 'Số lượng bán',
+              color: theme.palette.primary.main,
+              valueFormatter: (value) => `${Number(value || 0)} sản phẩm`,
+            }]}
+            margin={{ top: 20, right: 20, bottom: 40, left: 20 }}
+            grid={{ vertical: true }}
+            height={320}
+          />
+        )}
+      </ChartPanel>
 
-        {/* Revenue */}
-        <div className="bg-white rounded-xl p-5 border-l-4 border-l-success shadow-sm relative overflow-hidden">
-          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">Revenue</p>
-          <div className="flex justify-between items-end mb-3">
-            <h2 className="text-3xl font-bold text-gray-800">$42,850</h2>
-            <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center text-success">
-              <i className="fa-solid fa-money-bill-wave"></i>
-            </div>
-          </div>
-          <p className="text-sm font-medium text-success flex items-center gap-1">
-            <i className="fa-solid fa-arrow-trend-up text-xs"></i>
-            8.4% from last month
-          </p>
-        </div>
-
-        {/* New Customers */}
-        <div className="bg-white rounded-xl p-5 border-l-4 border-l-indigo-500 shadow-sm relative overflow-hidden">
-          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">New Customers</p>
-          <div className="flex justify-between items-end mb-3">
-            <h2 className="text-3xl font-bold text-gray-800">156</h2>
-            <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-500">
-              <i className="fa-solid fa-user-plus"></i>
-            </div>
-          </div>
-          <p className="text-sm font-medium text-gray-500 flex items-center gap-1">
-            <span className="w-2 h-0.5 bg-gray-400 inline-block rounded"></span>
-            Stable growth
-          </p>
-        </div>
-
-        {/* Pending Orders */}
-        <div className="bg-white rounded-xl p-5 border-l-4 border-l-warning shadow-sm relative overflow-hidden">
-          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">Pending Orders</p>
-          <div className="flex justify-between items-end mb-3">
-            <h2 className="text-3xl font-bold text-gray-800">23</h2>
-            <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center text-warning">
-              <i className="fa-solid fa-clipboard-list"></i>
-            </div>
-          </div>
-          <p className="text-sm font-medium text-danger flex items-center gap-1">
-             <i className="fa-solid fa-triangle-exclamation text-xs"></i>
-            5 urgent orders
-          </p>
-        </div>
-      </div>
-
-      {/* Main Content Area */}
-      <div className="grid grid-cols-3 gap-6">
-        {/* Left Column (Span 2) */}
-        <div className="col-span-2 flex flex-col gap-6">
-          {/* Recent Orders */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="flex justify-between items-center p-5 border-b border-gray-100">
-              <h3 className="text-lg font-bold text-gray-800">Recent Orders</h3>
-              <a href="#" className="text-sm font-bold text-primary hover:text-primary-dark transition-colors">View All</a>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead className="text-[11px] text-gray-400 font-bold uppercase tracking-wider bg-gray-50/50">
-                  <tr>
-                    <th className="px-5 py-4">Order ID</th>
-                    <th className="px-5 py-4">Customer</th>
-                    <th className="px-5 py-4">Date</th>
-                    <th className="px-5 py-4">Status</th>
-                    <th className="px-5 py-4 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {/* Order 1 */}
-                  <tr className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-5 py-4 font-bold text-gray-700">#RX-8821</td>
-                    <td className="px-5 py-4">
-                      <div className="flex flex-col">
-                        <span className="font-medium text-gray-800">Alexander Thome</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 text-gray-500">Oct 24, 2023</td>
-                    <td className="px-5 py-4">
-                      <span className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded text-[11px] font-bold tracking-wide uppercase">Processing</span>
-                    </td>
-                    <td className="px-5 py-4 text-right font-bold text-gray-800">$142.00</td>
-                  </tr>
-                  {/* Order 2 */}
-                  <tr className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-5 py-4 font-bold text-gray-700">#RX-8820</td>
-                    <td className="px-5 py-4">
-                      <div className="flex flex-col">
-                        <span className="font-medium text-gray-800">Elena Rodriguez</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 text-gray-500">Oct 24, 2023</td>
-                    <td className="px-5 py-4">
-                      <span className="px-2.5 py-1 bg-orange-50 text-orange-600 rounded text-[11px] font-bold tracking-wide uppercase">Shipped</span>
-                    </td>
-                    <td className="px-5 py-4 text-right font-bold text-gray-800">$89.50</td>
-                  </tr>
-                  {/* Order 3 */}
-                  <tr className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-5 py-4 font-bold text-gray-700">#RX-8819</td>
-                    <td className="px-5 py-4">
-                      <div className="flex flex-col">
-                        <span className="font-medium text-gray-800">Marcus Wright</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 text-gray-500">Oct 23, 2023</td>
-                    <td className="px-5 py-4">
-                      <span className="px-2.5 py-1 bg-green-50 text-green-600 rounded text-[11px] font-bold tracking-wide uppercase">Delivered</span>
-                    </td>
-                    <td className="px-5 py-4 text-right font-bold text-gray-800">$210.25</td>
-                  </tr>
-                  {/* Order 4 */}
-                  <tr className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-5 py-4 font-bold text-gray-700">#RX-8818</td>
-                    <td className="px-5 py-4">
-                      <div className="flex flex-col">
-                        <span className="font-medium text-gray-800">Sarah O'Connor</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 text-gray-500">Oct 23, 2023</td>
-                    <td className="px-5 py-4">
-                      <span className="px-2.5 py-1 bg-green-50 text-green-600 rounded text-[11px] font-bold tracking-wide uppercase">Delivered</span>
-                    </td>
-                    <td className="px-5 py-4 text-right font-bold text-gray-800">$45.00</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Sales Trend Chart (Mock) */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex flex-col h-[300px]">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-bold text-gray-800">Sales Trend</h3>
-              <div className="flex gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-primary"></span>
-                  <span className="text-xs font-medium text-gray-500">Sales</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-gray-200"></span>
-                  <span className="text-xs font-medium text-gray-500">Target</span>
-                </div>
-              </div>
-            </div>
-            
-            {/* Chart visualization */}
-            <div className="flex-1 flex items-end gap-2 px-4 pb-2">
-                {[4, 6, 8, 7, 10, 12, 9].map((height, i) => (
-                    <div key={i} className="flex-1 flex flex-col justify-end items-center gap-2 group h-full">
-                        <div 
-                            className="w-full bg-blue-100 group-hover:bg-blue-200 rounded-t-sm transition-all duration-300 max-w-[60px]" 
-                            style={{ height: `${height * 8}%` }}
-                        ></div>
-                        <span className="text-[10px] uppercase font-bold text-gray-400 mt-2">
-                            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i]}
-                        </span>
-                    </div>
-                ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column (Span 1) */}
-        <div className="col-span-1 flex flex-col gap-6">
-          {/* Low Stock Alert */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 border-t-4 border-t-danger">
-            <h3 className="text-[16px] font-bold text-danger flex items-center gap-2 mb-2">
-              <i className="fa-solid fa-triangle-exclamation"></i>
-              Low Stock Alert
-            </h3>
-            <p className="text-[13px] text-gray-500 mb-6 leading-relaxed">
-              The following medications are below critical threshold levels.
-            </p>
-            
-            <div className="space-y-3 mb-6">
-              {/* Item 1 */}
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg group hover:bg-white hover:shadow-sm transition-all border border-transparent hover:border-gray-100 cursor-pointer">
-                <div>
-                  <h4 className="font-bold text-gray-800 text-sm">Amoxicillin 500mg</h4>
-                  <p className="text-[11px] font-bold text-danger uppercase tracking-wide mt-1">12 UNITS LEFT</p>
-                </div>
-                <button className="text-primary opacity-60 group-hover:opacity-100 transition-opacity bg-white/50 p-2 rounded shrink-0">
-                  <i className="fa-solid fa-rotate-right"></i>
-                </button>
-              </div>
-              
-              {/* Item 2 */}
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg group hover:bg-white hover:shadow-sm transition-all border border-transparent hover:border-gray-100 cursor-pointer">
-                <div>
-                  <h4 className="font-bold text-gray-800 text-sm">Lisinopril 10mg</h4>
-                  <p className="text-[11px] font-bold text-danger uppercase tracking-wide mt-1">8 UNITS LEFT</p>
-                </div>
-                <button className="text-primary opacity-60 group-hover:opacity-100 transition-opacity bg-white/50 p-2 rounded shrink-0">
-                  <i className="fa-solid fa-rotate-right"></i>
-                </button>
-              </div>
-
-              {/* Item 3 */}
-              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg group hover:bg-white hover:shadow-sm transition-all border border-transparent hover:border-gray-100 cursor-pointer">
-                <div>
-                  <h4 className="font-bold text-gray-800 text-sm">Metformin 850mg</h4>
-                  <p className="text-[11px] font-bold text-warning uppercase tracking-wide mt-1">24 UNITS LEFT</p>
-                </div>
-                <button className="text-primary opacity-60 group-hover:opacity-100 transition-opacity bg-white/50 p-2 rounded shrink-0">
-                  <i className="fa-solid fa-rotate-right"></i>
-                </button>
-              </div>
-            </div>
-
-            <button className="w-full py-2.5 border border-gray-200 text-gray-700 rounded-md font-bold text-xs uppercase tracking-wider hover:bg-gray-50 transition-colors">
-              Manage Inventory
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Recent Orders */}
+        <div className="lg:col-span-2 bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-gray-900">Đơn Hàng Gần Đây</h2>
+            <button onClick={() => navigate('/orders')} className="text-blue-600 hover:text-blue-700 text-sm font-medium">
+              Xem tất cả →
             </button>
           </div>
 
-          {/* Prescription Accuracy - Dark Card */}
-          <div className="bg-[#1A233A] rounded-xl p-6 shadow-sm text-white relative overflow-hidden group">
-            {/* Background design elements */}
-            <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:opacity-20 transition-opacity duration-500">
-                <i className="fa-solid fa-certificate text-9xl"></i>
+          {recentOrders.length === 0 ? (
+            <p className="text-gray-400 text-sm text-center py-8">Chưa có đơn hàng nào</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-3 px-3 font-semibold text-gray-600 text-xs">MÃ ĐƠN</th>
+                    <th className="text-left py-3 px-3 font-semibold text-gray-600 text-xs">KHÁCH HÀNG</th>
+                    <th className="text-left py-3 px-3 font-semibold text-gray-600 text-xs">TRẠNG THÁI</th>
+                    <th className="text-right py-3 px-3 font-semibold text-gray-600 text-xs">TỔNG TIỀN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentOrders.map((order) => (
+                    <tr key={order.id} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => navigate('/orders')}>
+                      <td className="py-3 px-3 font-medium text-gray-900 text-xs">{order.orderCode}</td>
+                      <td className="py-3 px-3 text-gray-700 text-xs">{order.customer.fullName}</td>
+                      <td className="py-3 px-3">
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getStatusColor(order.status)}`}>
+                          {getStatusLabel(order.status)}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-right font-semibold text-gray-900 text-xs">{formatCurrency(order.totalAmount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            
-            <h3 className="font-semibold text-[15px] mb-1 relative z-10 text-gray-200">Prescription Accuracy</h3>
-            <div className="flex items-end gap-3 mb-6 relative z-10">
-              <span className="text-[42px] leading-none font-bold tracking-tight">99.8%</span>
-              <span className="text-xs font-semibold text-green-400 bg-green-400/10 px-2 py-1 rounded mb-1">↑ 0.2% vs LW</span>
-            </div>
-            <p className="text-[13px] text-gray-400 leading-relaxed max-w-[90%] relative z-10">
-              Your pharmacy is operating at peak precision. No reported errors in the last 72 hours.
-            </p>
+          )}
+        </div>
+
+        {/* Low Stock Alert */}
+        <div className="bg-white rounded-lg p-6 shadow-sm border border-orange-200">
+          <div className="flex items-center gap-2 mb-4">
+            <FontAwesomeIcon icon={faTriangleExclamation} className="text-orange-500" />
+            <h2 className="text-lg font-bold text-gray-900">Cảnh Báo Tồn Kho</h2>
           </div>
 
-          {/* Pending Tasks */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-            <h3 className="text-lg font-bold text-gray-800 mb-4">Pending Tasks</h3>
-            <div className="flex flex-col gap-3">
-              <label className="flex items-start gap-3 cursor-pointer group">
-                <div className="w-5 h-5 rounded border border-gray-300 flex items-center justify-center mt-0.5 group-hover:border-primary transition-colors bg-gray-50"></div>
-                <span className="text-[14px] text-gray-600 select-none group-hover:text-gray-900 transition-colors">Review cold chain log</span>
-              </label>
-              
-              <label className="flex items-start gap-3 cursor-pointer group">
-                <div className="w-5 h-5 rounded border border-gray-300 flex items-center justify-center mt-0.5 group-hover:border-primary transition-colors bg-gray-50"></div>
-                <span className="text-[14px] text-gray-600 select-none group-hover:text-gray-900 transition-colors">Approve new vendor list</span>
-              </label>
-
-              <label className="flex items-start gap-3 cursor-pointer group">
-                <div className="w-5 h-5 rounded bg-primary border border-primary flex items-center justify-center mt-0.5 shadow-sm text-white">
-                  <i className="fa-solid fa-check text-[10px]"></i>
+          {lowStock.length === 0 ? (
+            <p className="text-green-600 text-sm text-center py-6">
+              <FontAwesomeIcon icon={faCircleCheck} className="mr-2" />
+              Tất cả sản phẩm đều đủ hàng
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {lowStock.slice(0, 5).map((item) => (
+                <div key={item.id} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-700 truncate">{item.productName}</p>
+                    <p className="text-xs text-gray-500">{item.medicineCode}</p>
+                  </div>
+                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${item.totalStock === 0 ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
+                    {item.totalStock === 0 ? 'Hết hàng' : `${item.totalStock} còn lại`}
+                  </span>
                 </div>
-                <span className="text-[14px] text-gray-400 select-none line-through">Monthly narcotics audit</span>
-              </label>
+              ))}
+            </div>
+          )}
+
+          <button onClick={() => navigate('/inventory')} className="w-full mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition">
+            QUẢN LÝ KHO →
+          </button>
+        </div>
+      </div>
+
+      {/* Bottom Row: Top Products + Quick Stats */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Top Products */}
+        <div className="lg:col-span-2 bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+          <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <FontAwesomeIcon icon={faTrophy} className="text-amber-500" />
+            Sản Phẩm Bán Chạy
+          </h2>
+          {topProducts.length === 0 ? (
+            <p className="text-gray-400 text-sm text-center py-6">Chưa có dữ liệu bán hàng</p>
+          ) : (
+            <div className="space-y-3">
+              {topProducts.map((product, idx) => (
+                <div key={product.productId} className="flex items-center gap-4 p-3 rounded-lg hover:bg-gray-50">
+                  <span className="text-lg font-bold text-gray-400 w-6">#{idx + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{product.productName}</p>
+                    <p className="text-xs text-gray-500">{product.orderCount} đơn hàng</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-bold text-green-600">{product.totalSold} đã bán</p>
+                    <p className="text-xs text-gray-500">{formatCurrency(product.totalRevenue)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Overview Card */}
+        <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg p-6 shadow-sm text-white">
+          <h2 className="text-sm font-bold mb-4 opacity-90 flex items-center gap-2">
+            <FontAwesomeIcon icon={faChartLine} />
+            TỔNG QUAN
+          </h2>
+          <div className="space-y-4">
+            <div>
+              <p className="text-3xl font-bold">{formatCurrency(stats?.revenue.total || 0)}</p>
+              <p className="text-xs opacity-70 mt-1">Tổng doanh thu</p>
+            </div>
+            <div className="border-t border-blue-400 pt-4 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="opacity-80">Tổng đơn hàng</span>
+                <span className="font-bold">{stats?.orders.total || 0}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="opacity-80">Sản phẩm</span>
+                <span className="font-bold">{stats?.products.active || 0} / {stats?.products.total || 0}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="opacity-80">Hoàn thành</span>
+                <span className="font-bold">{stats?.orders.byStatus?.completed || 0}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="opacity-80">Đã hủy</span>
+                <span className="font-bold text-red-300">{stats?.orders.byStatus?.cancelled || 0}</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
-  );
+  )
 }

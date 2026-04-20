@@ -33,7 +33,7 @@ function LoginAndRegister({ onClose, onAuthSuccess }: LoginAndRegisterProps) {
 	const handleAuthSuccess = (user: AuthUser, accessToken: string) => {
 		localStorage.setItem('clientAccessToken', accessToken)
 		localStorage.setItem('clientUser', JSON.stringify(user))
-		toast.success('Dang nhap thanh cong')
+		toast.success('Đăng nhập thành công')
 		onAuthSuccess?.(user)
 		onClose()
 	}
@@ -125,8 +125,8 @@ function LoginAndRegister({ onClose, onAuthSuccess }: LoginAndRegisterProps) {
 						{isForgotMode
 							? 'Nhap email de nhan OTP va xac nhan khoi phuc mat khau.'
 							: isRegisterMode
-								? 'Dang ky nhanh de theo doi don hang va uu dai ca nhan.'
-								: 'Dang nhap de xem lich su mua thuoc va uu dai rieng cho ban.'}
+								? 'Đăng ký nhanh để theo dõi đơn hàng và ưu đãi cá nhân.'
+								: 'Đăng nhập để xem lịch sử mua thuốc và ưu đãi riêng cho bạn.'}
 					</p>
 				</div>
 

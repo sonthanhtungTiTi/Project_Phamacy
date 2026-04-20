@@ -21,9 +21,12 @@ const toProductCard = (product) => ({
 })
 
 const getProducts = async ({ categoryId, search, page = 1, limit = 20 }) => {
+	// Check if limit is 0 or "all" - if so, fetch all products
+	const isGetAll = limit === 0 || limit === '0' || String(limit).toLowerCase() === 'all'
+	
 	const numericPage = Math.max(1, Number(page) || 1)
-	const numericLimit = Math.min(100, Math.max(1, Number(limit) || 20))
-	const skip = (numericPage - 1) * numericLimit
+	const numericLimit = isGetAll ? 0 : Math.min(100, Math.max(1, Number(limit) || 20))
+	const skip = isGetAll ? 0 : (numericPage - 1) * numericLimit
 
 	const filter = { isActive: { $ne: false } }
 	const andConditions = []
@@ -67,20 +70,25 @@ const getProducts = async ({ categoryId, search, page = 1, limit = 20 }) => {
 	}
 
 	const [items, total] = await Promise.all([
-		Product.find(filter)
-			.sort({ createdAt: -1 })
-			.skip(skip)
-			.limit(numericLimit),
+		isGetAll
+			? Product.find(filter)
+					.select('_id medicineCode productName price categoryId categoryName images isActive')
+					.sort({ createdAt: -1 })
+			: Product.find(filter)
+					.select('_id medicineCode productName price categoryId categoryName images isActive')
+					.sort({ createdAt: -1 })
+					.skip(skip)
+					.limit(numericLimit),
 		Product.countDocuments(filter),
 	])
 
 	return {
 		items: items.map(toProductCard),
 		pagination: {
-			page: numericPage,
-			limit: numericLimit,
+			page: isGetAll ? 1 : numericPage,
+			limit: isGetAll ? total : numericLimit,
 			total,
-			totalPages: Math.max(1, Math.ceil(total / numericLimit)),
+			totalPages: isGetAll ? 1 : Math.max(1, Math.ceil(total / numericLimit)),
 		},
 	}
 }

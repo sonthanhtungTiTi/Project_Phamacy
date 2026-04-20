@@ -121,11 +121,11 @@ function Header({
 					<div className="flex items-center justify-between pt-4">
 					<div className="flex items-center gap-2 text-sm">
 						<LocalShippingIcon sx={{ fontSize: 20, color: 'white' }} />
-							<span className="text-white/90">Giao hang tai:</span>
+							<span className="text-white/90">Giao hàng tại:</span>
 							<span className="ml-1 font-semibold">Ho Chi Minh</span>
 						</div>
 						<div className="text-sm">
-							<span className="text-white/95"> Tai app  - Freeship moi don - Uu dai den 200.000d</span>
+							<span className="text-white/95"> Tại app  - Freeship mỗi đơn - Ưu đãi đến 200.000đ</span>
 						</div>
 					</div>
 
@@ -141,7 +141,7 @@ function Header({
 								<SearchIcon sx={{ position: 'absolute', left: 12, fontSize: 20, color: 'rgb(120, 113, 108)' }} />
 								<input
 									type="text"
-									placeholder="Tim theo ten thuoc, benh..."
+									placeholder="Tìm theo tên thuốc, bệnh..."
 									value={searchKeyword}
 									onFocus={() => setIsSearchOpen(true)}
 									onChange={(event) => {
@@ -161,11 +161,11 @@ function Header({
 							{shouldShowSearchPopover && (
 								<div className="absolute left-0 right-0 top-[46px] z-[1002] max-h-[420px] overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-[0_14px_40px_rgba(15,23,42,0.18)]">
 									{isSearching && (
-										<p className="px-2 py-2 text-sm text-slate-500">Dang tim san pham...</p>
+											<p className="px-2 py-2 text-sm text-slate-500">Đang tìm sản phẩm...</p>
 									)}
 
 									{!isSearching && searchResults.length === 0 && (
-										<p className="px-2 py-2 text-sm text-slate-500">Khong tim thay san pham phu hop.</p>
+											<p className="px-2 py-2 text-sm text-slate-500">Không tìm thấy sản phẩm phù hợp.</p>
 									)}
 
 									{!isSearching &&
@@ -197,7 +197,7 @@ function Header({
 						</div>
 
 						<button className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#1f9542]">
-							Tra gia thuoc
+							Tra giá thuốc
 						</button>
 
 						<CartBadge onClick={openCartPage} />
@@ -217,7 +217,7 @@ function Header({
 									onClick={onLogout}
 									className="rounded-xl bg-white px-3 py-2 text-sm font-semibold text-[#1f9542]"
 								>
-									Dang xuat
+									Đăng xuất
 								</button>
 							</div>
 						) : (
@@ -226,7 +226,7 @@ function Header({
 								onClick={onOpenAuth}
 								className="rounded-xl px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700/30"
 							>
-								Dang nhap
+								Đăng nhập
 							</button>
 						)}
 					</div>

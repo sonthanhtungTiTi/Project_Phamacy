@@ -2,15 +2,16 @@ const crypto = require('crypto');
 const axios = require('axios');
 
 const MOMO_CONFIG = {
-  partnerCode: (process.env.MOMO_PARTNER_ID || 'MOMOBKUN20170829').trim(),
-  accessKey: (process.env.MOMO_ACCESS_KEY || 'F8BBA842ECF85').trim(),
-  secretKey: (process.env.MOMO_SECRET_KEY || 'K951B6PE1waDMi640xX8PJqVrMuD1cM7').trim(),
+  partnerCode: (process.env.MOMO_PARTNER_CODE || 'MOMOBKUN20180529').trim(),
+  accessKey: (process.env.MOMO_ACCESS_KEY || 'klm05TvNBzhg7h7j').trim(),
+  secretKey: (process.env.MOMO_SECRET_KEY || 'at67qH6mk8w5Y1nAyMoYKMWACiEi2bsa').trim(),
   environment: (process.env.MOMO_ENVIRONMENT || 'sandbox').trim(),
+  redirectUrl: (process.env.MOMO_REDIRECT_URL || 'http://localhost:5173/checkout/momo-return').trim(),
 };
 
 // Momo endpoints
 const MOMO_ENDPOINT = {
-  sandbox: 'https://test-payment.momo.vn/v2/gateway/api/create',
+  sandbox: process.env.MOMO_API_URL || 'https://test-payment.momo.vn/v2/gateway/api/create',
   production: 'https://payment.momo.vn/v2/gateway/api/create',
 };
 
@@ -18,12 +19,22 @@ const MOMO_ENDPOINT = {
  * Tạo request signature cho Momo
  */
 function generateSignature(data, secretKey) {
+  // Thứ tự PHẢI đúng theo MoMo specification
   const rawSignature = `accessKey=${data.accessKey}&amount=${data.amount}&extraData=${data.extraData}&ipnUrl=${data.ipnUrl}&orderId=${data.orderId}&orderInfo=${data.orderInfo}&partnerCode=${data.partnerCode}&redirectUrl=${data.redirectUrl}&requestId=${data.requestId}&requestType=${data.requestType}`;
   
-  return crypto
+  console.log('=== MoMo Signature Debug ===');
+  console.log('Raw signature string:', rawSignature);
+  console.log('Secret Key:', secretKey);
+  
+  const signature = crypto
     .createHmac('sha256', secretKey)
     .update(rawSignature)
     .digest('hex');
+  
+  console.log('Computed signature:', signature);
+  console.log('===========================');
+  
+  return signature;
 }
 
 /**
@@ -31,13 +42,44 @@ function generateSignature(data, secretKey) {
  * @param {Object} orderData - { orderId, amount, orderInfo, redirectUrl, ipnUrl, extraData }
  */
 async function createMomoPayment(orderData) {
+  // Log config để debug
+  console.log('=== MoMo Config ===');
+  console.log('Partner Code:', MOMO_CONFIG.partnerCode);
+  console.log('Access Key:', MOMO_CONFIG.accessKey);
+  console.log('Environment:', MOMO_CONFIG.environment);
+  console.log('===================');
+
   const requestId = `${Date.now()}`;
-  const orderId = orderData.orderId;
-  const amount = String(orderData.amount); // Momo expects numeric string
+  const orderId = String(orderData.orderId);
+  const amount = String(orderData.amount);
   const orderInfo = orderData.orderInfo || `Thanh toán đơn hàng #${orderId}`;
   const requestType = 'captureWallet';
-  const extraData = Buffer.from(String(orderData.extraData || ''), 'utf8').toString('base64');
+  
+  // Đảm bảo có giá trị default cho redirectUrl và ipnUrl
+  const redirectUrl = orderData.redirectUrl || MOMO_CONFIG.redirectUrl;
+  const ipnUrl = orderData.ipnUrl || `http://localhost:3000/api/client/momo/callback`;
+  
+  // extraData phải là string, không base64 trong signature
+  const extraData = orderData.extraData ? String(orderData.extraData) : '';
 
+  // Build object cho signature (không include signature trong nó)
+  const signatureData = {
+    accessKey: MOMO_CONFIG.accessKey,
+    amount: amount,
+    extraData: extraData,
+    ipnUrl: ipnUrl,
+    orderId: orderId,
+    orderInfo: orderInfo,
+    partnerCode: MOMO_CONFIG.partnerCode,
+    redirectUrl: redirectUrl,
+    requestId: requestId,
+    requestType: requestType,
+  };
+
+  // Tạo signature
+  const signature = generateSignature(signatureData, MOMO_CONFIG.secretKey);
+
+  // Build final request body
   const momoRequest = {
     partnerCode: MOMO_CONFIG.partnerCode,
     partnerName: 'Pharmacy Store',
@@ -45,28 +87,37 @@ async function createMomoPayment(orderData) {
     amount: amount,
     orderId: orderId,
     orderInfo: orderInfo,
-    redirectUrl: orderData.redirectUrl,
-    ipnUrl: orderData.ipnUrl,
+    redirectUrl: redirectUrl,
+    ipnUrl: ipnUrl,
     lang: 'vi',
     requestType: requestType,
     autoCapture: true,
-    extraData, // extraData nên là base64 string
+    extraData: extraData,
     accessKey: MOMO_CONFIG.accessKey,
+    signature: signature,
   };
 
-  // Tạo signature
-  momoRequest.signature = generateSignature(momoRequest, MOMO_CONFIG.secretKey);
+  console.log('=== Final MoMo Request ===');
+  console.log(JSON.stringify(momoRequest, null, 2));
+  console.log('==========================');
 
   try {
     const endpoint = MOMO_CONFIG.environment === 'production'
       ? MOMO_ENDPOINT.production
       : MOMO_ENDPOINT.sandbox;
 
+    console.log('MoMo API Endpoint:', endpoint);
+    console.log('Sending request to MoMo...');
+
     const response = await axios.post(endpoint, momoRequest, {
       headers: {
         'Content-Type': 'application/json',
       },
     });
+
+    console.log('=== MoMo Response ===');
+    console.log(JSON.stringify(response.data, null, 2));
+    console.log('=====================');
 
     if (response.data.resultCode !== 0) {
       throw new Error(`MoMo error (${response.data.resultCode}): ${response.data.message}`);
@@ -112,13 +163,14 @@ function verifyMomoSignature(data, signature) {
 function handleMomoCallback(momoData) {
   // Verify signature
   const isValid = verifyMomoSignature(momoData, momoData.signature);
+  const normalizedResultCode = Number(momoData.resultCode);
   
   if (!isValid) {
     throw new Error('Invalid Momo signature');
   }
 
   // resultCode = 0: thành công
-  if (momoData.resultCode === 0) {
+  if (!Number.isNaN(normalizedResultCode) && normalizedResultCode === 0) {
     return {
       success: true,
       orderId: momoData.orderId,
@@ -129,7 +181,7 @@ function handleMomoCallback(momoData) {
     return {
       success: false,
       orderId: momoData.orderId,
-      resultCode: momoData.resultCode,
+      resultCode: Number.isNaN(normalizedResultCode) ? momoData.resultCode : normalizedResultCode,
       message: momoData.message,
     };
   }

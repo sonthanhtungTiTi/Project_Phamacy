@@ -8,6 +8,8 @@ const categoryRoutes = require('./category.route')
 const productRoutes = require('./product.route')
 const healthNewsRoutes = require('./healthNews.route')
 const momoRoutes = require('./momo.route')
+const consultationRoutes = require('./consultation.route')
+const staffRoutes = require('./staff.route')
 
 const router = express.Router()
 
@@ -20,5 +22,7 @@ router.use('/products', productRoutes)
 router.use('/medicines', productRoutes)
 router.use('/health-news', healthNewsRoutes)
 router.use('/momo', momoRoutes)
+router.use('/consultations', consultationRoutes)
+router.use('/staff', staffRoutes)
 
 module.exports = router
