@@ -286,8 +286,9 @@ export default function ClientChatWidget({ socket, isOpen, onClose }: ClientChat
 			}
 
 			setConversation(data.conversation)
-			if (data.systemMessage) {
-				setMessages((prev) => upsertMessages(prev, [data.systemMessage]))
+			const systemMessage = data.systemMessage
+			if (systemMessage !== null) {
+				setMessages((prev) => upsertMessages(prev, [systemMessage]))
 			}
 			setHumanNotice('Nhan vien se tham gia ho tro trong giay lat.')
 			setIsBotTyping(false)

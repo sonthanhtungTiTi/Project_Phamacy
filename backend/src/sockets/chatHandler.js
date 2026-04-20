@@ -115,6 +115,11 @@ const registerChatHandlers = ({ io, socket, onlineUsers }) => {
 				conversation: data.conversation,
 			})
 
+			emitToSupportStaff(io, onlineUsers, 'new_support_request', {
+				conversation: data.conversation,
+				source: 'client_request',
+			})
+
 			done({ success: true, data })
 		} catch (error) {
 			const mapped = mapError(error)
@@ -282,6 +287,11 @@ const registerChatHandlers = ({ io, socket, onlineUsers }) => {
 			if (data.requiresHuman) {
 				emitToSupportStaff(io, onlineUsers, 'chat:human-requested', {
 					conversation: data.conversation,
+				})
+
+				emitToSupportStaff(io, onlineUsers, 'new_support_request', {
+					conversation: data.conversation,
+					source: 'ai_call_admin',
 				})
 			}
 

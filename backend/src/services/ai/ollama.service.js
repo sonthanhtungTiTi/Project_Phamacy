@@ -1,46 +1,116 @@
 const axios = require('axios')
 
-const OLLAMA_API_URL = process.env.OLLAMA_API_URL || 'http://localhost:11434/api/generate'
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3'
+const resolveOllamaApiUrl = () => {
+	const configuredUrl =
+		process.env.OLLAMA_API_URL ||
+		process.env.OLLAMA_BASE_URL ||
+		process.env.OLLAMA_HOST ||
+		'http://localhost:11434/api/generate'
+
+	const normalized = String(configuredUrl || '').trim().replace(/\/$/, '')
+	if (!normalized) {
+		return 'http://localhost:11434/api/generate'
+	}
+
+	if (normalized.endsWith('/api/generate')) {
+		return normalized
+	}
+
+	return `${normalized}/api/generate`
+}
+
+const OLLAMA_API_URL = resolveOllamaApiUrl()
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:0.5b'
+
+const ACTIONS = {
+	FIND_PRODUCT: 'FIND_PRODUCT',
+	CHAT: 'CHAT',
+	CALL_ADMIN: 'CALL_ADMIN',
+}
 
 const INTENTS = {
-	GENERAL_FAQ: 'GENERAL_FAQ',
-	QUERY_PRODUCT: 'QUERY_PRODUCT',
-	QUERY_ORDER: 'QUERY_ORDER',
-	CALL_HUMAN: 'CALL_HUMAN',
+	FIND_PRODUCT: ACTIONS.FIND_PRODUCT,
+	CHAT: ACTIONS.CHAT,
+	CALL_ADMIN: ACTIONS.CALL_ADMIN,
+	GENERAL_FAQ: ACTIONS.CHAT,
+	QUERY_PRODUCT: ACTIONS.FIND_PRODUCT,
+	QUERY_ORDER: ACTIONS.CHAT,
+	CALL_HUMAN: ACTIONS.CALL_ADMIN,
 }
 
-const ALLOWED_INTENTS = new Set(Object.values(INTENTS))
+const ALLOWED_ACTIONS = new Set(Object.values(ACTIONS))
 
-const extractFirstJsonObject = (text = '') => {
-	const start = text.indexOf('{')
-	const end = text.lastIndexOf('}')
-	if (start < 0 || end < 0 || end <= start) {
-		return null
+const PRODUCT_HINT_REGEX = /\btim|tra\s?cuu|san\s?pham|thuoc|gia\b/i
+const CALL_ADMIN_HINT_REGEX = /\bnhan\s?vien|admin|nguoi\s?that|tu\s?van\s?truc\s?tiep|ho\s?tro\s?truc\s?tiep|goi\b/i
+
+const cleanJsonString = (text = '') => {
+	let value = String(text || '').trim()
+	if (!value) {
+		return '{}'
 	}
 
-	const jsonSnippet = text.slice(start, end + 1)
+	value = value
+		.replace(/```json/gi, '')
+		.replace(/```/g, '')
+		.replace(/[“”]/g, '"')
+		.replace(/[‘’]/g, "'")
+		.trim()
+
+	const start = value.indexOf('{')
+	const end = value.lastIndexOf('}')
+	if (start >= 0 && end > start) {
+		value = value.slice(start, end + 1)
+	}
+
+	value = value.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3')
+	value = value.replace(/'/g, '"')
+	value = value.replace(/,\s*([}\]])/g, '$1')
+
+	const openCurly = (value.match(/{/g) || []).length
+	const closeCurly = (value.match(/}/g) || []).length
+	if (openCurly > closeCurly) {
+		value += '}'.repeat(openCurly - closeCurly)
+	}
+
+	const openSquare = (value.match(/\[/g) || []).length
+	const closeSquare = (value.match(/\]/g) || []).length
+	if (openSquare > closeSquare) {
+		value += ']'.repeat(openSquare - closeSquare)
+	}
+
+	return value
+}
+
+const parseOllamaJson = (rawText, fallback = {}) => {
+	const cleaned = cleanJsonString(rawText)
+
 	try {
-		return JSON.parse(jsonSnippet)
+		return JSON.parse(cleaned)
 	} catch {
-		return null
+		return fallback
 	}
 }
 
-const normalizeIntent = (intent) => {
-	const upper = String(intent || '').trim().toUpperCase()
-	return ALLOWED_INTENTS.has(upper) ? upper : INTENTS.GENERAL_FAQ
+const normalizeAction = (value) => {
+	const upper = String(value || '').trim().toUpperCase()
+	return ALLOWED_ACTIONS.has(upper) ? upper : ACTIONS.CHAT
 }
 
-const toSafeConfidence = (value) => {
-	const numeric = Number(value)
-	if (Number.isNaN(numeric)) {
-		return 0
+const inferActionFromUserMessage = (message = '', keyword = '') => {
+	const combined = `${String(message || '')} ${String(keyword || '')}`.trim()
+
+	if (CALL_ADMIN_HINT_REGEX.test(combined)) {
+		return ACTIONS.CALL_ADMIN
 	}
-	return Math.max(0, Math.min(1, numeric))
+
+	if (PRODUCT_HINT_REGEX.test(combined)) {
+		return ACTIONS.FIND_PRODUCT
+	}
+
+	return ACTIONS.CHAT
 }
 
-const callOllama = async ({ prompt, system = '', temperature = 0.2 }) => {
+const callOllama = async ({ prompt, system = '', temperature = 0.2, format = 'json' }) => {
 	const response = await axios.post(
 		OLLAMA_API_URL,
 		{
@@ -48,6 +118,7 @@ const callOllama = async ({ prompt, system = '', temperature = 0.2 }) => {
 			prompt,
 			system,
 			stream: false,
+			format,
 			options: {
 				temperature,
 			},
@@ -63,30 +134,65 @@ const callOllama = async ({ prompt, system = '', temperature = 0.2 }) => {
 const classifyIntent = async ({ message, history = [] }) => {
 	const compactHistory = history
 		.slice(-6)
-		.map((item) => `${item.senderType}: ${String(item.content || '').slice(0, 300)}`)
+		.map((item) => `${item.senderType}: ${String(item.content || '').slice(0, 200)}`)
 		.join('\n')
 
-	const systemPrompt = [
-		'You are an intent classifier for a pharmacy support chatbot.',
-		'Return JSON only with this exact shape:',
-		'{"intent":"GENERAL_FAQ|QUERY_PRODUCT|QUERY_ORDER|CALL_HUMAN","confidence":0.0,"query":"string","reason":"string"}',
-		'No markdown, no explanation, no extra keys.',
-	].join(' ')
+	const systemPrompt = `Ban la bo dieu phoi chat agent cho nha thuoc.
+Chi tra ve JSON hop le, khong markdown, khong giai thich.
+Schema bat buoc:
+{"action":"FIND_PRODUCT|CHAT|CALL_ADMIN","keyword":"string","message":"string"}
+Quy tac:
+- FIND_PRODUCT: khi khach muon tim, hoi, so sanh san pham/thuoc.
+- CALL_ADMIN: khi khach yeu cau gap nguoi that, tu van truc tiep, khieu nai, hoac AI khong chac chan.
+- CHAT: cac truong hop con lai, message la cau tra loi ngan gon bang tieng Viet.`
 
 	const prompt = [
-		`Conversation history:\n${compactHistory || '(empty)'}`,
-		`User message: ${String(message || '')}`,
-		'Classify now.',
+		'Chon duy nhat 1 action thuc te cho cau cua khach (khong duoc tra ve danh sach action).',
+		`Lich su hoi thoai gan day:\n${compactHistory || '(empty)'}`,
+		`Khach hang noi: "${String(message || '')}"`,
+		'Return JSON now.',
 	].join('\n\n')
 
-	const raw = await callOllama({ prompt, system: systemPrompt, temperature: 0 })
-	const parsed = extractFirstJsonObject(raw) || {}
+	const raw = await callOllama({
+		prompt,
+		system: systemPrompt,
+		temperature: 0,
+		format: 'json',
+	})
+
+	const parsed = parseOllamaJson(raw, {})
+	const rawAction = String(parsed.action || '').trim()
+	let action = normalizeAction(rawAction)
+	const keyword = String(parsed.keyword || parsed.query || '').trim()
+	const messageText = String(parsed.message || '').trim()
+	const inferredAction = inferActionFromUserMessage(message, keyword)
+
+	const hasAmbiguousAction = rawAction.includes('|') || rawAction.includes(',')
+	if (!ALLOWED_ACTIONS.has(rawAction.toUpperCase()) || hasAmbiguousAction) {
+		action = inferredAction
+	}
+
+	if (inferredAction === ACTIONS.CALL_ADMIN) {
+		action = ACTIONS.CALL_ADMIN
+	} else if (action === ACTIONS.CHAT && inferredAction === ACTIONS.FIND_PRODUCT) {
+		action = ACTIONS.FIND_PRODUCT
+	}
+
+	const compatibilityIntent =
+		action === ACTIONS.FIND_PRODUCT
+			? INTENTS.QUERY_PRODUCT
+			: action === ACTIONS.CALL_ADMIN
+				? INTENTS.CALL_HUMAN
+				: INTENTS.GENERAL_FAQ
 
 	return {
-		intent: normalizeIntent(parsed.intent),
-		confidence: toSafeConfidence(parsed.confidence),
-		query: String(parsed.query || '').trim(),
-		reason: String(parsed.reason || '').trim(),
+		action,
+		keyword,
+		message: messageText,
+		intent: compatibilityIntent,
+		confidence: 1,
+		query: keyword,
+		reason: '',
 		raw,
 	}
 }
@@ -95,7 +201,7 @@ const generateReplyFromData = async ({ userMessage, intent, action, dataSummary,
 	const systemPrompt = [
 		'You are a friendly pharmacy support assistant.',
 		'Respond in Vietnamese, concise, practical, and polite.',
-		'Only use provided facts. If data is empty, say you could not find exact records and ask if user wants human support.',
+		'Only use provided facts. If data is empty, explain clearly and suggest human support.',
 	].join(' ')
 
 	const prompt = [
@@ -107,11 +213,14 @@ const generateReplyFromData = async ({ userMessage, intent, action, dataSummary,
 		'Write the final customer-facing response.',
 	].join('\n\n')
 
-	return callOllama({ prompt, system: systemPrompt, temperature: 0.4 })
+	return callOllama({ prompt, system: systemPrompt, temperature: 0.35, format: 'text' })
 }
 
 module.exports = {
+	ACTIONS,
 	INTENTS,
+	cleanJsonString,
+	parseOllamaJson,
 	classifyIntent,
 	generateReplyFromData,
 }

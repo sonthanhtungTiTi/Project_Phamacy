@@ -520,12 +520,12 @@ const summarizeForPrompt = (payload) => {
 }
 
 const fallbackReplyByAction = (action) => {
-	if (action === INTENTS.QUERY_ORDER) {
-		return 'Mình chưa tra cuu duoc don hang ngay luc nay. Ban co the gui ma don (bat dau bang ORD) hoac yeu cau gap nhan vien de duoc ho tro nhanh hon.'
+	if (action === INTENTS.QUERY_PRODUCT || action === INTENTS.FIND_PRODUCT) {
+		return 'Mình chua tim thay dung san pham ban can. Ban co the gui ten thuoc, hoat chat hoac yeu cau gap nhan vien de duoc tu van ky hon.'
 	}
 
-	if (action === INTENTS.QUERY_PRODUCT) {
-		return 'Mình chua tim thay dung san pham ban can. Ban co the gui ten thuoc, hoat chat hoac yeu cau gap nhan vien de duoc tu van ky hon.'
+	if (action === INTENTS.CALL_HUMAN || action === INTENTS.CALL_ADMIN) {
+		return 'Mình da ghi nhan yeu cau gap nhan vien. Ban vui long doi trong giay lat.'
 	}
 
 	return 'Mình dang gap loi khi xu ly. Ban co muon minh ket noi voi nhan vien ho tro ngay khong?'
@@ -600,9 +600,12 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 	}
 
 	let intentResult = {
+		action: INTENTS.CHAT,
 		intent: INTENTS.GENERAL_FAQ,
 		confidence: 0,
+		keyword: '',
 		query: '',
+		message: '',
 		reason: '',
 	}
 
@@ -621,25 +624,36 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 		})
 	} catch {
 		intentResult = {
+			action: INTENTS.CHAT,
 			intent: INTENTS.GENERAL_FAQ,
 			confidence: 0,
+			keyword: '',
 			query: '',
+			message: '',
 			reason: 'classification_failed',
 		}
 	}
 
-	let action = intentResult.intent
-	if (intentResult.confidence < 0.45) {
-		action = INTENTS.CALL_HUMAN
+	let action = intentResult.action || intentResult.intent || INTENTS.CHAT
+	if (action === INTENTS.GENERAL_FAQ) {
+		action = INTENTS.CHAT
+	}
+
+	if (action === INTENTS.QUERY_PRODUCT) {
+		action = INTENTS.FIND_PRODUCT
 	}
 
 	if (action === INTENTS.CALL_HUMAN) {
+		action = INTENTS.CALL_ADMIN
+	}
+
+	if (action === INTENTS.CALL_ADMIN) {
 		const humanFlow = await requestHumanFromClient(clientId, conversation._id, intentResult.reason || 'low_confidence')
 		const botDoc = await appendMessage({
 			conversationId: conversation._id,
 			senderType: 'bot',
 			content: 'Mình chua chac chan ve cau tra loi. Mình da chuyen cuoc tro chuyen sang nhan vien de ho tro ban ngay.',
-			intent: intentResult.intent,
+			intent: intentResult.intent || INTENTS.CALL_HUMAN,
 			action,
 			meta: {
 				confidence: intentResult.confidence,
@@ -658,30 +672,25 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 	}
 
 	let dataPayload = {}
-	if (action === INTENTS.QUERY_PRODUCT) {
+	if (action === INTENTS.FIND_PRODUCT || action === INTENTS.QUERY_PRODUCT) {
 		dataPayload = {
-			products: await searchProducts(intentResult.query || content),
-		}
-	}
-
-	if (action === INTENTS.QUERY_ORDER) {
-		dataPayload = {
-			orders: await searchOrdersForUser({
-				clientId,
-				query: intentResult.query || content,
-			}),
+			products: await searchProducts(intentResult.keyword || intentResult.query || content),
 		}
 	}
 
 	let botReply = ''
 	try {
-		botReply = await generateReplyFromData({
-			userMessage: content,
-			intent: intentResult.intent,
-			action,
-			dataSummary: summarizeForPrompt(dataPayload),
-			contextNote: 'This is a pharmacy customer support chat.',
-		})
+		if (action === INTENTS.CHAT && intentResult.message) {
+			botReply = intentResult.message
+		} else {
+			botReply = await generateReplyFromData({
+				userMessage: content,
+				intent: intentResult.intent,
+				action,
+				dataSummary: summarizeForPrompt(dataPayload),
+				contextNote: 'This is a pharmacy customer support chat.',
+			})
+		}
 	} catch {
 		botReply = fallbackReplyByAction(action)
 	}
@@ -694,10 +703,11 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 		conversationId: conversation._id,
 		senderType: 'bot',
 		content: botReply,
-		intent: intentResult.intent,
+		intent: intentResult.intent || INTENTS.CHAT,
 		action,
 		meta: {
 			confidence: intentResult.confidence,
+			keyword: intentResult.keyword || intentResult.query,
 			query: intentResult.query,
 			reason: intentResult.reason,
 		},
@@ -705,7 +715,7 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 
 	const updatedConversation = await touchConversation(conversation._id, {
 		status: 'ai',
-		lastIntent: intentResult.intent,
+		lastIntent: intentResult.intent || INTENTS.CHAT,
 		lastAction: action,
 	})
 

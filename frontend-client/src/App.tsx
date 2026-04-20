@@ -343,7 +343,7 @@ function App() {
     return (
       <>
         {renderCallOverlays()}
-        <ProductDetail productId={activeProductId} onBackHome={backHome} onOpenConsultPage={openConsultPage} />
+        <ProductDetail productId={activeProductId} onBackHome={backHome} />
         {renderSupportTools()}
       </>
     )
