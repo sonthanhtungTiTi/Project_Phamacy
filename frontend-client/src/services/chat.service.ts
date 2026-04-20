@@ -47,6 +47,15 @@ export interface ChatConversationPayload {
 	messages: ChatMessage[]
 }
 
+export interface ChatSendMessageResult {
+	conversation: ChatConversation
+	userMessage: ChatMessage | null
+	botMessage: ChatMessage | null
+	systemMessage: ChatMessage | null
+	requiresHuman: boolean
+	action: string
+}
+
 interface ApiResponse<T> {
 	success: boolean
 	message: string
@@ -98,4 +107,14 @@ export const requestHumanSupport = async (conversationId: string, reason = '') =
 		conversation: ChatConversation
 		systemMessage: ChatMessage | null
 	}>(response)
+}
+
+export const sendChatMessage = async (conversationId: string, message: string) => {
+	const response = await fetch(`${API_BASE_URL}/client/chat/message`, {
+		method: 'POST',
+		headers: getAuthHeaders(),
+		body: JSON.stringify({ conversationId, message }),
+	})
+
+	return parseApiResponse<ChatSendMessageResult>(response)
 }

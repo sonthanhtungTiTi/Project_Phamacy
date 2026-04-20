@@ -40,8 +40,14 @@ const INTENTS = {
 
 const ALLOWED_ACTIONS = new Set(Object.values(ACTIONS))
 
-const PRODUCT_HINT_REGEX = /\btim|tra\s?cuu|san\s?pham|thuoc|gia\b/i
-const CALL_ADMIN_HINT_REGEX = /\bnhan\s?vien|admin|nguoi\s?that|tu\s?van\s?truc\s?tiep|ho\s?tro\s?truc\s?tiep|goi\b/i
+const normalizeText = (value = '') =>
+	String(value || '')
+		.normalize('NFD')
+		.replace(/[\u0300-\u036f]/g, '')
+		.toLowerCase()
+
+const PRODUCT_HINT_REGEX = /\b(tim|tra\s?cuu|san\s?pham|thuoc|gia|hoat\s?chat)\b/i
+const CALL_ADMIN_HINT_REGEX = /\b(nhan\s?vien|admin|nguoi\s?that|tu\s?van\s?truc\s?tiep|ho\s?tro\s?truc\s?tiep|ket\s?noi\s?nhan\s?vien)\b/i
 
 const cleanJsonString = (text = '') => {
 	let value = String(text || '').trim()
@@ -97,7 +103,7 @@ const normalizeAction = (value) => {
 }
 
 const inferActionFromUserMessage = (message = '', keyword = '') => {
-	const combined = `${String(message || '')} ${String(keyword || '')}`.trim()
+	const combined = normalizeText(`${String(message || '')} ${String(keyword || '')}`.trim())
 
 	if (CALL_ADMIN_HINT_REGEX.test(combined)) {
 		return ACTIONS.CALL_ADMIN
@@ -110,19 +116,24 @@ const inferActionFromUserMessage = (message = '', keyword = '') => {
 	return ACTIONS.CHAT
 }
 
-const callOllama = async ({ prompt, system = '', temperature = 0.2, format = 'json' }) => {
+const callOllama = async ({ prompt, system = '', temperature = 0.2, format } = {}) => {
+	const requestPayload = {
+		model: OLLAMA_MODEL,
+		prompt,
+		system,
+		stream: false,
+		options: {
+			temperature,
+		},
+	}
+
+	if (format !== undefined && format !== null && String(format).trim() !== '') {
+		requestPayload.format = format
+	}
+
 	const response = await axios.post(
 		OLLAMA_API_URL,
-		{
-			model: OLLAMA_MODEL,
-			prompt,
-			system,
-			stream: false,
-			format,
-			options: {
-				temperature,
-			},
-		},
+		requestPayload,
 		{
 			timeout: Number(process.env.OLLAMA_TIMEOUT_MS || 20000),
 		},
@@ -166,13 +177,14 @@ Quy tac:
 	const keyword = String(parsed.keyword || parsed.query || '').trim()
 	const messageText = String(parsed.message || '').trim()
 	const inferredAction = inferActionFromUserMessage(message, keyword)
+	const explicitHumanRequest = CALL_ADMIN_HINT_REGEX.test(normalizeText(message))
 
 	const hasAmbiguousAction = rawAction.includes('|') || rawAction.includes(',')
 	if (!ALLOWED_ACTIONS.has(rawAction.toUpperCase()) || hasAmbiguousAction) {
 		action = inferredAction
 	}
 
-	if (inferredAction === ACTIONS.CALL_ADMIN) {
+	if (explicitHumanRequest || inferredAction === ACTIONS.CALL_ADMIN) {
 		action = ACTIONS.CALL_ADMIN
 	} else if (action === ACTIONS.CHAT && inferredAction === ACTIONS.FIND_PRODUCT) {
 		action = ACTIONS.FIND_PRODUCT
@@ -213,7 +225,7 @@ const generateReplyFromData = async ({ userMessage, intent, action, dataSummary,
 		'Write the final customer-facing response.',
 	].join('\n\n')
 
-	return callOllama({ prompt, system: systemPrompt, temperature: 0.35, format: 'text' })
+	return callOllama({ prompt, system: systemPrompt, temperature: 0.35 })
 }
 
 module.exports = {

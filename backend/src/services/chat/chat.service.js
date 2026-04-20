@@ -231,6 +231,8 @@ const requestHumanFromClient = async (clientId, conversationId = null, reason = 
 		conversation = await findOrCreateActiveConversation(clientId)
 	}
 
+	let switchedToPending = false
+
 	if (conversation.status !== 'human' && conversation.status !== 'human_pending') {
 		conversation = await touchConversation(conversation._id, {
 			status: 'human_pending',
@@ -241,10 +243,11 @@ const requestHumanFromClient = async (clientId, conversationId = null, reason = 
 				lastHumanRequestReason: String(reason || '').trim(),
 			},
 		})
+		switchedToPending = true
 	}
 
 	let systemMessage = null
-	if (conversation.status === 'human_pending') {
+	if (conversation.status === 'human_pending' && switchedToPending) {
 		systemMessage = await appendMessage({
 			conversationId: conversation._id,
 			senderType: 'system',
@@ -445,6 +448,24 @@ const extractOrderCode = (text) => {
 	return match ? match[0] : ''
 }
 
+const normalizeText = (value) =>
+	String(value || '')
+		.normalize('NFD')
+		.replace(/[\u0300-\u036f]/g, '')
+		.toLowerCase()
+
+const PRODUCT_LOOKUP_HINT_REGEX = /\b(tim|tra\s?cuu|san\s?pham|thuoc|gia|hoat\s?chat|con\s?hang)\b/i
+const ORDER_LOOKUP_HINT_REGEX = /\b(don\s?hang|ma\s?don|trang\s?thai|van\s?don|giao\s?hang|thanh\s?toan|ord[0-9]{6,})\b/i
+
+const formatCurrencyVnd = (value) => {
+	const amount = Number(value || 0)
+	if (!Number.isFinite(amount)) {
+		return '0 VND'
+	}
+
+	return `${Math.round(amount).toLocaleString('vi-VN')} VND`
+}
+
 const searchProducts = async (query) => {
 	const normalized = String(query || '').trim()
 	const filter = { isActive: true }
@@ -519,7 +540,7 @@ const summarizeForPrompt = (payload) => {
 	}
 }
 
-const fallbackReplyByAction = (action) => {
+const fallbackReplyByAction = (action, { isHumanPending = false } = {}) => {
 	if (action === INTENTS.QUERY_PRODUCT || action === INTENTS.FIND_PRODUCT) {
 		return 'Mình chua tim thay dung san pham ban can. Ban co the gui ten thuoc, hoat chat hoac yeu cau gap nhan vien de duoc tu van ky hon.'
 	}
@@ -528,7 +549,42 @@ const fallbackReplyByAction = (action) => {
 		return 'Mình da ghi nhan yeu cau gap nhan vien. Ban vui long doi trong giay lat.'
 	}
 
-	return 'Mình dang gap loi khi xu ly. Ban co muon minh ket noi voi nhan vien ho tro ngay khong?'
+	if (isHumanPending) {
+		return 'Mình van dang ho tro ban trong luc ket noi nhan vien. Ban co the mo ta them trieu chung hoac ten thuoc can tim de minh tra cuu nhanh.'
+	}
+
+	return 'Mình da nhan duoc tin nhan cua ban. Ban co the mo ta cu the hon de minh tu van chinh xac ngay bay gio.'
+}
+
+const buildDataDrivenFallbackReply = ({ action, dataPayload = {}, queryText = '' }) => {
+	const products = Array.isArray(dataPayload.products) ? dataPayload.products : []
+	if (products.length > 0 && (action === INTENTS.FIND_PRODUCT || action === INTENTS.QUERY_PRODUCT)) {
+		const lines = products.slice(0, 3).map((item, index) => {
+			const stockText = Number(item.totalStock || 0) > 0 ? `con ${Number(item.totalStock || 0)}` : 'tam het hang'
+			return `${index + 1}. ${item.productName || 'San pham'} - ${formatCurrencyVnd(item.price)} (${stockText})`
+		})
+
+		return ['Mình tim thay mot so san pham phu hop:', ...lines, 'Ban can minh goi y them theo trieu chung khong?'].join('\n')
+	}
+
+	const orders = Array.isArray(dataPayload.orders) ? dataPayload.orders : []
+	if (orders.length > 0) {
+		const lines = orders.slice(0, 3).map((item, index) => {
+			const code = item.orderCode || 'N/A'
+			const status = item.status || 'unknown'
+			const payment = item.paymentStatus || 'unknown'
+			const total = formatCurrencyVnd(item.totalAmount)
+			return `${index + 1}. ${code} - Trang thai: ${status}, Thanh toan: ${payment}, Tong: ${total}`
+		})
+
+		return ['Mình da tim thay thong tin don hang gan day cua ban:', ...lines, 'Ban can kiem tra don nao chi tiet hon khong?'].join('\n')
+	}
+
+	if (ORDER_LOOKUP_HINT_REGEX.test(normalizeText(queryText)) || extractOrderCode(queryText)) {
+		return 'Mình chua tim thay don hang phu hop voi thong tin ban cung cap. Ban vui long gui ma don dang ORD... de minh kiem tra chinh xac hon.'
+	}
+
+	return ''
 }
 
 const handleClientMessage = async ({ clientId, clientName = '', conversationId, content }) => {
@@ -565,6 +621,7 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 	let hydratedConversation = await ChatConversation.findById(conversation._id)
 		.populate('clientId', 'fullName email phone role')
 		.populate('assignedStaffId', 'fullName email phone role')
+	const isHumanPending = hydratedConversation.status === 'human_pending'
 
 	if (hydratedConversation.status === 'human') {
 		return {
@@ -574,28 +631,6 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 			systemMessage: null,
 			requiresHuman: false,
 			action: 'HUMAN_CHAT',
-		}
-	}
-
-	if (hydratedConversation.status === 'human_pending') {
-		const botDoc = await appendMessage({
-			conversationId: hydratedConversation._id,
-			senderType: 'bot',
-			content: 'Mình da chuyen yeu cau sang nhan vien. Ban vui long doi trong giay lat nhe.',
-			action: INTENTS.CALL_HUMAN,
-		})
-
-		hydratedConversation = await ChatConversation.findById(hydratedConversation._id)
-			.populate('clientId', 'fullName email phone role')
-			.populate('assignedStaffId', 'fullName email phone role')
-
-		return {
-			conversation: serializeConversation(hydratedConversation),
-			userMessage: serializeMessage(userMessageDoc),
-			botMessage: serializeMessage(botDoc),
-			systemMessage: null,
-			requiresHuman: true,
-			action: INTENTS.CALL_HUMAN,
 		}
 	}
 
@@ -647,12 +682,25 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 		action = INTENTS.CALL_ADMIN
 	}
 
+	const normalizedContent = normalizeText(content)
+	const inferredProductLookup = PRODUCT_LOOKUP_HINT_REGEX.test(normalizedContent)
+	const inferredOrderLookup =
+		ORDER_LOOKUP_HINT_REGEX.test(normalizedContent) || Boolean(extractOrderCode(content))
+
+	if (action === INTENTS.CHAT && inferredProductLookup) {
+		action = INTENTS.FIND_PRODUCT
+	}
+
+	if (action === INTENTS.CALL_ADMIN && isHumanPending) {
+		action = INTENTS.CHAT
+	}
+
 	if (action === INTENTS.CALL_ADMIN) {
 		const humanFlow = await requestHumanFromClient(clientId, conversation._id, intentResult.reason || 'low_confidence')
 		const botDoc = await appendMessage({
 			conversationId: conversation._id,
 			senderType: 'bot',
-			content: 'Mình chua chac chan ve cau tra loi. Mình da chuyen cuoc tro chuyen sang nhan vien de ho tro ban ngay.',
+			content: 'Mình da chuyen cuoc tro chuyen sang nhan vien. Trong luc cho, ban van co the tiep tuc dat cau hoi de minh ho tro nhanh.',
 			intent: intentResult.intent || INTENTS.CALL_HUMAN,
 			action,
 			meta: {
@@ -674,13 +722,36 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 	let dataPayload = {}
 	if (action === INTENTS.FIND_PRODUCT || action === INTENTS.QUERY_PRODUCT) {
 		dataPayload = {
+			...dataPayload,
 			products: await searchProducts(intentResult.keyword || intentResult.query || content),
 		}
 	}
 
+	if (inferredOrderLookup) {
+		dataPayload = {
+			...dataPayload,
+			orders: await searchOrdersForUser({
+				clientId,
+				query: intentResult.keyword || intentResult.query || content,
+			}),
+		}
+	}
+
+	const contextNoteParts = ['This is a pharmacy customer support chat.']
+	if (isHumanPending) {
+		contextNoteParts.push('A staff handoff is pending. Keep helping the customer while they wait.')
+	}
+	if (Array.isArray(dataPayload.products) && dataPayload.products.length > 0) {
+		contextNoteParts.push('Product search data is included in Data.')
+	}
+	if (Array.isArray(dataPayload.orders) && dataPayload.orders.length > 0) {
+		contextNoteParts.push('Order lookup data is included in Data.')
+	}
+
 	let botReply = ''
+	let usedFallbackReply = false
 	try {
-		if (action === INTENTS.CHAT && intentResult.message) {
+		if (action === INTENTS.CHAT && intentResult.message && !inferredProductLookup && !inferredOrderLookup) {
 			botReply = intentResult.message
 		} else {
 			botReply = await generateReplyFromData({
@@ -688,15 +759,25 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 				intent: intentResult.intent,
 				action,
 				dataSummary: summarizeForPrompt(dataPayload),
-				contextNote: 'This is a pharmacy customer support chat.',
+				contextNote: contextNoteParts.join(' '),
 			})
 		}
 	} catch {
-		botReply = fallbackReplyByAction(action)
+		usedFallbackReply = true
+		botReply =
+			buildDataDrivenFallbackReply({ action, dataPayload, queryText: content }) ||
+			fallbackReplyByAction(action, { isHumanPending })
 	}
 
 	if (!botReply) {
-		botReply = fallbackReplyByAction(action)
+		usedFallbackReply = true
+		botReply =
+			buildDataDrivenFallbackReply({ action, dataPayload, queryText: content }) ||
+			fallbackReplyByAction(action, { isHumanPending })
+	}
+
+	if (isHumanPending && usedFallbackReply && action !== INTENTS.CALL_ADMIN && !/^Nhan vien dang duoc ket noi\./i.test(botReply)) {
+		botReply = `Nhan vien dang duoc ket noi. ${botReply}`
 	}
 
 	const botDoc = await appendMessage({
@@ -713,8 +794,10 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 		},
 	})
 
+	const nextStatus = isHumanPending ? 'human_pending' : 'ai'
+
 	const updatedConversation = await touchConversation(conversation._id, {
-		status: 'ai',
+		status: nextStatus,
 		lastIntent: intentResult.intent || INTENTS.CHAT,
 		lastAction: action,
 	})
@@ -724,7 +807,7 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 		userMessage: serializeMessage(userMessageDoc),
 		botMessage: serializeMessage(botDoc),
 		systemMessage: null,
-		requiresHuman: false,
+		requiresHuman: nextStatus === 'human_pending',
 		action,
 	}
 }

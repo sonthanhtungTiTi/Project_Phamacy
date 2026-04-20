@@ -4,9 +4,11 @@ import { Bot, Headset, Loader2, MessageCircle, Send, UserRound, X } from 'lucide
 import {
 	getMyChatConversation,
 	requestHumanSupport,
+	sendChatMessage,
 	type ChatConversation,
 	type ChatConversationPayload,
 	type ChatMessage,
+	type ChatSendMessageResult,
 } from '../../services/chat.service'
 
 interface ClientChatWidgetProps {
@@ -19,15 +21,6 @@ type AckPayload<T> = {
 	success?: boolean
 	data?: T
 	error?: string
-}
-
-type SendMessageResult = {
-	conversation: ChatConversation
-	userMessage: ChatMessage | null
-	botMessage: ChatMessage | null
-	systemMessage: ChatMessage | null
-	requiresHuman: boolean
-	action: string
 }
 
 const upsertMessages = (current: ChatMessage[], incoming: ChatMessage[]) => {
@@ -231,14 +224,20 @@ export default function ClientChatWidget({ socket, isOpen, onClose }: ClientChat
 		}
 
 		try {
-			if (!socket?.connected) {
-				throw new Error('Mat ket noi realtime. Vui long thu lai.')
-			}
+			let data: ChatSendMessageResult
 
-			const data = await emitWithAck<SendMessageResult>('chat:message:send', {
-				conversationId: conversation.id,
-				content,
-			})
+			if (socket?.connected) {
+				try {
+					data = await emitWithAck<ChatSendMessageResult>('chat:message:send', {
+						conversationId: conversation.id,
+						content,
+					})
+				} catch {
+					data = await sendChatMessage(conversation.id, content)
+				}
+			} else {
+				data = await sendChatMessage(conversation.id, content)
+			}
 
 			setConversation(data.conversation)
 
