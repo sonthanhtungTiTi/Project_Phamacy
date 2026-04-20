@@ -5,7 +5,14 @@
 @tailwind utilities;
 
 @layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
   body {
+    margin: 0;
     @apply bg-main-bg text-dark-text font-sans antialiased;
   }
 }

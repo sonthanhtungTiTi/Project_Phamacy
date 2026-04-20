@@ -12,6 +12,7 @@ import ProfilePage from './pages/ProfilePage.tsx'
 import VideoCallOverlay from './components/calls/VideoCallComponent'
 import CallTargetSelector from './components/calls/CallTargetSelector'
 import FloatingContactButton from './components/ui/FloatingContactButton'
+import ClientChatWidget from './components/chat/ClientChatWidget'
 import { useWebRTCCall } from './hooks/useWebRTCCall'
 import type { IncomingCallData } from './hooks/useWebRTCCall'
 
@@ -56,6 +57,7 @@ function App() {
 
   // ==================== CALL TARGET SELECTOR ====================
   const [showCallSelector, setShowCallSelector] = useState(false)
+  const [isChatWidgetOpen, setIsChatWidgetOpen] = useState(false)
 
   // ==================== SOCKET.IO CONNECTION ====================
   const [socket, setSocket] = useState<Socket | null>(null)
@@ -282,6 +284,10 @@ function App() {
     window.open('https://zalo.me/0398668953', '_blank', 'noopener,noreferrer')
   }
 
+  const handleFloatingAiChat = () => {
+    setIsChatWidgetOpen(true)
+  }
+
   // ==================== SHARED OVERLAYS ====================
   const renderCallOverlays = () => (
     <>
@@ -315,12 +321,20 @@ function App() {
     </>
   )
 
-  const renderFloatingButton = () => (
-    <FloatingContactButton
-      onVideoCall={handleFloatingCall}
-      onVoiceCall={handleFloatingCall}
-      onZaloChat={handleFloatingZaloChat}
-    />
+  const renderSupportTools = () => (
+    <>
+      <FloatingContactButton
+        onVideoCall={handleFloatingCall}
+        onVoiceCall={handleFloatingCall}
+        onZaloChat={handleFloatingZaloChat}
+        onAiChat={handleFloatingAiChat}
+      />
+      <ClientChatWidget
+        socket={socket}
+        isOpen={isChatWidgetOpen}
+        onClose={() => setIsChatWidgetOpen(false)}
+      />
+    </>
   )
 
   // ==================== RENDER PAGES ====================
@@ -330,7 +344,7 @@ function App() {
       <>
         {renderCallOverlays()}
         <ProductDetail productId={activeProductId} onBackHome={backHome} onOpenConsultPage={openConsultPage} />
-        {renderFloatingButton()}
+        {renderSupportTools()}
       </>
     )
   }
@@ -344,7 +358,7 @@ function App() {
           onBackHome={backHome}
           onOpenProductDetail={openProductDetail}
         />
-        {renderFloatingButton()}
+        {renderSupportTools()}
       </>
     )
   }
@@ -354,7 +368,7 @@ function App() {
       <>
         {renderCallOverlays()}
         <ConsultPharmacy onBackHome={backHome} />
-        {renderFloatingButton()}
+        {renderSupportTools()}
       </>
     )
   }
@@ -364,7 +378,7 @@ function App() {
       <>
         {renderCallOverlays()}
         <CartPage onBackHome={backHome} />
-        {renderFloatingButton()}
+        {renderSupportTools()}
       </>
     )
   }
@@ -380,7 +394,7 @@ function App() {
           }}
           onBackHome={backHome}
         />
-        {renderFloatingButton()}
+        {renderSupportTools()}
       </>
     )
   }
@@ -390,7 +404,7 @@ function App() {
       <>
         {renderCallOverlays()}
         <MomoResultPage />
-        {renderFloatingButton()}
+        {renderSupportTools()}
       </>
     )
   }
@@ -400,7 +414,7 @@ function App() {
       <>
         {renderCallOverlays()}
         <ProfilePage onBackHome={backHome} />
-        {renderFloatingButton()}
+        {renderSupportTools()}
       </>
     )
   }
@@ -410,7 +424,7 @@ function App() {
       <>
         {renderCallOverlays()}
         <HealthNewsDetail newsId={activeHealthNewsId} onBackHome={backHome} />
-        {renderFloatingButton()}
+        {renderSupportTools()}
       </>
     )
   }
@@ -424,7 +438,7 @@ function App() {
         onOpenConsultPage={openConsultPage}
         onOpenHealthNews={openHealthNewsPage}
       />
-      {renderFloatingButton()}
+      {renderSupportTools()}
     </>
   )
 }

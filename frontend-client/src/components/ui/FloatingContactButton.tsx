@@ -5,12 +5,14 @@ interface FloatingContactButtonProps {
 	onVideoCall?: () => void
 	onVoiceCall?: () => void
 	onZaloChat?: () => void
+	onAiChat?: () => void
 }
 
 export default function FloatingContactButton({
 	onVideoCall,
 	onVoiceCall,
 	onZaloChat,
+	onAiChat,
 }: FloatingContactButtonProps) {
 	const [isOpen, setIsOpen] = useState(false)
 
@@ -21,6 +23,23 @@ export default function FloatingContactButton({
 			{/* Menu Items */}
 			{isOpen && (
 				<div className="absolute bottom-24 right-0 bg-white rounded-2xl shadow-2xl border border-gray-200 p-4 space-y-3 min-w-[200px] animate-in fade-in zoom-in-95 duration-200">
+					{/* AI Chat */}
+					{onAiChat && (
+						<button
+							onClick={() => {
+								onAiChat()
+								handleClose()
+							}}
+							className="flex items-center gap-3 w-full px-4 py-3 rounded-xl hover:bg-cyan-50 transition text-left"
+							title="Trò chuyện với AI hỗ trợ"
+						>
+							<div className="flex-shrink-0 w-10 h-10 bg-cyan-100 rounded-full flex items-center justify-center">
+								<MessageSquare className="w-5 h-5 text-cyan-600" />
+							</div>
+							<span className="text-sm font-medium text-gray-900">Chat AI</span>
+						</button>
+					)}
+
 					{/* Gọi Tư Vấn (opens call selector) */}
 					{(onVideoCall || onVoiceCall) && (
 						<button

@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken')
+const registerChatHandlers = require('./chatHandler')
 
 // Theo dõi người dùng đang online: userId -> { userId, role, name, socketIds:Set }
 const onlineUsers = new Map()
@@ -73,7 +74,10 @@ const setupCallHandlers = (io) => {
             }
         })
 
-        // ==================== 3. WEBRTC SIGNALING LOGIC ====================
+        // ==================== 3. CHAT AI + HUMAN SUPPORT ====================
+        registerChatHandlers({ io, socket, onlineUsers })
+
+        // ==================== 4. WEBRTC SIGNALING LOGIC ====================
         // Gửi yêu cầu gọi
         socket.on('call:initiate', ({ targetUserId, callType, callId, callerData }) => {
             if (!targetUserId) return
@@ -147,7 +151,7 @@ const setupCallHandlers = (io) => {
             })
         })
 
-        // ==================== 4. NGẮT KẾT NỐI ====================
+        // ==================== 5. NGẮT KẾT NỐI ====================
         socket.on('disconnect', () => {
             console.log(`🔌 Khách rời đi: ${socket.id} (User ID: ${socket.userId})`)
 

@@ -21,7 +21,6 @@ import { styled, useTheme } from '@mui/material/styles'
 import type { Theme } from '@mui/material/styles'
 import { BarChart } from '@mui/x-charts/BarChart'
 import { PieChart, pieClasses } from '@mui/x-charts/PieChart'
-import { useDrawingArea } from '@mui/x-charts/hooks'
 import { useAuthStore } from '../stores/authStore'
 import analyticsService from '../services/analytics.service'
 import type { DashboardStats, RecentOrder, LowStockProduct, RevenueDataPoint, TopProduct } from '../services/analytics.service'
@@ -33,28 +32,6 @@ const ChartPanel = styled(Box)(({ theme }: { theme: Theme }) => ({
   boxShadow: theme.shadows[1],
   padding: theme.spacing(2.5),
 }))
-
-const PieCenterText = styled('text')(({ theme }) => ({
-  fill: theme.palette.text.primary,
-  textAnchor: 'middle',
-  dominantBaseline: 'central',
-  fontWeight: 700,
-}))
-
-function PieCenterLabel({ total }: { total: number }) {
-  const { width, height, left, top } = useDrawingArea()
-
-  return (
-    <>
-      <PieCenterText x={left + width / 2} y={top + height / 2 - 10} fontSize={28}>
-        {total}
-      </PieCenterText>
-      <PieCenterText x={left + width / 2} y={top + height / 2 + 14} fontSize={12} opacity={0.7}>
-        Đơn hàng
-      </PieCenterText>
-    </>
-  )
-}
 
 export default function Dashboard() {
   const { user } = useAuthStore()
@@ -89,10 +66,10 @@ export default function Dashboard() {
         analyticsService.getLowStockProducts(10),
         analyticsService.getTopProducts(5),
       ])
-      setStats(dashStats)
-      setRecentOrders(orders)
-      setLowStock(lowStockItems)
-      setTopProducts(topItems)
+      setStats(dashStats && typeof dashStats === 'object' ? dashStats : null)
+      setRecentOrders(Array.isArray(orders) ? orders : [])
+      setLowStock(Array.isArray(lowStockItems) ? lowStockItems : [])
+      setTopProducts(Array.isArray(topItems) ? topItems : [])
     } catch (err: any) {
       setError(err.message || 'Không thể tải dữ liệu dashboard')
     } finally {
@@ -105,7 +82,7 @@ export default function Dashboard() {
     setRevenueError(null)
     try {
       const chart = await analyticsService.getRevenueChart('daily', days)
-      setRevenueData(chart.data)
+      setRevenueData(Array.isArray(chart?.data) ? chart.data : [])
     } catch (err: any) {
       setRevenueData([])
       setRevenueError(err.message || 'Không thể tải dữ liệu doanh thu theo ngày')
@@ -168,23 +145,29 @@ export default function Dashboard() {
     )
   }
 
+  const revenueStats = stats?.revenue ?? { total: 0, today: 0, thisMonth: 0 }
+  const orderStats = stats?.orders ?? { total: 0, today: 0, thisMonth: 0, byStatus: {} as Record<string, number> }
+  const userStats = stats?.users ?? { total: 0, newThisMonth: 0 }
+  const productStats = stats?.products ?? { total: 0, active: 0, inactive: 0 }
+  const orderStatusStats = orderStats.byStatus ?? {}
+
   const statCards: Array<{ label: string; value: string; sub: string; icon: IconDefinition; borderColor: string }> = [
-    { label: 'DOANH THU HÔM NAY', value: formatCurrency(stats?.revenue.today || 0), sub: `Tháng: ${formatCurrency(stats?.revenue.thisMonth || 0)}`, icon: faMoneyBillWave, borderColor: 'border-l-green-500' },
-    { label: 'ĐƠN HÀNG HÔM NAY', value: String(stats?.orders.today || 0), sub: `Tháng: ${stats?.orders.thisMonth || 0} đơn`, icon: faFileInvoice, borderColor: 'border-l-blue-500' },
-    { label: 'KHÁCH HÀNG MỚI', value: String(stats?.users.newThisMonth || 0), sub: `Tổng: ${stats?.users.total || 0} người`, icon: faUsers, borderColor: 'border-l-purple-500' },
-    { label: 'CHỜ XỬ LÝ', value: String(stats?.orders.byStatus?.pending || 0), sub: `${stats?.orders.byStatus?.shipping || 0} đang giao`, icon: faHourglassHalf, borderColor: 'border-l-orange-500' },
+    { label: 'DOANH THU HÔM NAY', value: formatCurrency(Number(revenueStats.today || 0)), sub: `Tháng: ${formatCurrency(Number(revenueStats.thisMonth || 0))}`, icon: faMoneyBillWave, borderColor: 'border-l-green-500' },
+    { label: 'ĐƠN HÀNG HÔM NAY', value: String(Number(orderStats.today || 0)), sub: `Tháng: ${Number(orderStats.thisMonth || 0)} đơn`, icon: faFileInvoice, borderColor: 'border-l-blue-500' },
+    { label: 'KHÁCH HÀNG MỚI', value: String(Number(userStats.newThisMonth || 0)), sub: `Tổng: ${Number(userStats.total || 0)} người`, icon: faUsers, borderColor: 'border-l-purple-500' },
+    { label: 'CHỜ XỬ LÝ', value: String(Number(orderStatusStats.pending || 0)), sub: `${Number(orderStatusStats.shipping || 0)} đang giao`, icon: faHourglassHalf, borderColor: 'border-l-orange-500' },
   ]
 
   const revenueBarDataset = useMemo(
     () => revenueData.map((point) => ({
-      label: formatChartDate(point.date),
-      revenue: point.revenue,
+      label: formatChartDate(point?.date || ''),
+      revenue: Number(point?.revenue || 0),
     })),
     [revenueData],
   )
 
   const orderStatusPieData = useMemo(() => {
-    const byStatus = stats?.orders.byStatus || {}
+    const byStatus = stats?.orders?.byStatus || {}
     return [
       { id: 1, value: byStatus.pending || 0, label: 'Chờ xử lý', color: '#f59e0b' },
       { id: 2, value: byStatus.confirmed || 0, label: 'Đã xác nhận', color: '#3b82f6' },
@@ -196,8 +179,10 @@ export default function Dashboard() {
 
   const topProductDataset = useMemo(
     () => topProducts.slice(0, 5).map((item) => ({
-      name: item.productName.length > 24 ? `${item.productName.slice(0, 24)}...` : item.productName,
-      sold: item.totalSold,
+      name: (item?.productName || 'Sản phẩm').length > 24
+        ? `${(item?.productName || 'Sản phẩm').slice(0, 24)}...`
+        : (item?.productName || 'Sản phẩm'),
+      sold: Number(item?.totalSold || 0),
     })),
     [topProducts],
   )
@@ -283,9 +268,15 @@ export default function Dashboard() {
 
         <div className="xl:col-span-1">
           <ChartPanel>
-            <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary', mb: 1 }}>
-              Tỷ Trọng Trạng Thái Đơn
-            </Typography>
+            <div className="flex items-start justify-between gap-3 mb-1">
+              <Typography variant="h6" sx={{ fontWeight: 700, color: 'text.primary' }}>
+                Tỷ Trọng Trạng Thái Đơn
+              </Typography>
+              <div className="text-right">
+                <p className="text-xl font-bold text-gray-900 leading-none">{Number(orderStats.total || 0)}</p>
+                <p className="text-xs text-gray-500 mt-1">Đơn hàng</p>
+              </div>
+            </div>
             {orderStatusPieData.length === 0 ? (
               <div className="h-[320px] flex items-center justify-center text-sm text-gray-500">Chưa có dữ liệu trạng thái đơn hàng.</div>
             ) : (
@@ -313,9 +304,7 @@ export default function Dashboard() {
                     strokeWidth: 1,
                   },
                 }}
-              >
-                <PieCenterLabel total={stats?.orders.total || 0} />
-              </PieChart>
+              />
             )}
           </ChartPanel>
         </div>
@@ -370,16 +359,16 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {recentOrders.map((order) => (
-                    <tr key={order.id} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => navigate('/orders')}>
-                      <td className="py-3 px-3 font-medium text-gray-900 text-xs">{order.orderCode}</td>
-                      <td className="py-3 px-3 text-gray-700 text-xs">{order.customer.fullName}</td>
+                  {recentOrders.map((order, idx) => (
+                    <tr key={order?.id || `${order?.orderCode || 'order'}-${idx}`} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => navigate('/orders')}>
+                      <td className="py-3 px-3 font-medium text-gray-900 text-xs">{order?.orderCode || '--'}</td>
+                      <td className="py-3 px-3 text-gray-700 text-xs">{order?.customer?.fullName || 'Khách hàng'}</td>
                       <td className="py-3 px-3">
-                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getStatusColor(order.status)}`}>
-                          {getStatusLabel(order.status)}
+                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getStatusColor(order?.status || 'pending')}`}>
+                          {getStatusLabel(order?.status || 'pending')}
                         </span>
                       </td>
-                      <td className="py-3 px-3 text-right font-semibold text-gray-900 text-xs">{formatCurrency(order.totalAmount)}</td>
+                      <td className="py-3 px-3 text-right font-semibold text-gray-900 text-xs">{formatCurrency(Number(order?.totalAmount || 0))}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -403,13 +392,13 @@ export default function Dashboard() {
           ) : (
             <div className="space-y-2">
               {lowStock.slice(0, 5).map((item) => (
-                <div key={item.id} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                <div key={item?.id || item?.medicineCode || item?.productName} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-700 truncate">{item.productName}</p>
-                    <p className="text-xs text-gray-500">{item.medicineCode}</p>
+                    <p className="text-sm text-gray-700 truncate">{item?.productName || 'Sản phẩm'}</p>
+                    <p className="text-xs text-gray-500">{item?.medicineCode || '--'}</p>
                   </div>
-                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${item.totalStock === 0 ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
-                    {item.totalStock === 0 ? 'Hết hàng' : `${item.totalStock} còn lại`}
+                  <span className={`text-xs font-bold px-2 py-1 rounded-full ${Number(item?.totalStock || 0) === 0 ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
+                    {Number(item?.totalStock || 0) === 0 ? 'Hết hàng' : `${Number(item?.totalStock || 0)} còn lại`}
                   </span>
                 </div>
               ))}
@@ -435,15 +424,15 @@ export default function Dashboard() {
           ) : (
             <div className="space-y-3">
               {topProducts.map((product, idx) => (
-                <div key={product.productId} className="flex items-center gap-4 p-3 rounded-lg hover:bg-gray-50">
+                <div key={product?.productId || product?.productName || idx} className="flex items-center gap-4 p-3 rounded-lg hover:bg-gray-50">
                   <span className="text-lg font-bold text-gray-400 w-6">#{idx + 1}</span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{product.productName}</p>
-                    <p className="text-xs text-gray-500">{product.orderCount} đơn hàng</p>
+                    <p className="text-sm font-medium text-gray-900 truncate">{product?.productName || 'Sản phẩm'}</p>
+                    <p className="text-xs text-gray-500">{Number(product?.orderCount || 0)} đơn hàng</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-bold text-green-600">{product.totalSold} đã bán</p>
-                    <p className="text-xs text-gray-500">{formatCurrency(product.totalRevenue)}</p>
+                    <p className="text-sm font-bold text-green-600">{Number(product?.totalSold || 0)} đã bán</p>
+                    <p className="text-xs text-gray-500">{formatCurrency(Number(product?.totalRevenue || 0))}</p>
                   </div>
                 </div>
               ))}
@@ -459,25 +448,25 @@ export default function Dashboard() {
           </h2>
           <div className="space-y-4">
             <div>
-              <p className="text-3xl font-bold">{formatCurrency(stats?.revenue.total || 0)}</p>
+              <p className="text-3xl font-bold">{formatCurrency(Number(revenueStats.total || 0))}</p>
               <p className="text-xs opacity-70 mt-1">Tổng doanh thu</p>
             </div>
             <div className="border-t border-blue-400 pt-4 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="opacity-80">Tổng đơn hàng</span>
-                <span className="font-bold">{stats?.orders.total || 0}</span>
+                <span className="font-bold">{Number(orderStats.total || 0)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="opacity-80">Sản phẩm</span>
-                <span className="font-bold">{stats?.products.active || 0} / {stats?.products.total || 0}</span>
+                <span className="font-bold">{Number(productStats.active || 0)} / {Number(productStats.total || 0)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="opacity-80">Hoàn thành</span>
-                <span className="font-bold">{stats?.orders.byStatus?.completed || 0}</span>
+                <span className="font-bold">{Number(orderStatusStats.completed || 0)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="opacity-80">Đã hủy</span>
-                <span className="font-bold text-red-300">{stats?.orders.byStatus?.cancelled || 0}</span>
+                <span className="font-bold text-red-300">{Number(orderStatusStats.cancelled || 0)}</span>
               </div>
             </div>
           </div>

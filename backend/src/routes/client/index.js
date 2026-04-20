@@ -10,6 +10,7 @@ const healthNewsRoutes = require('./healthNews.route')
 const momoRoutes = require('./momo.route')
 const consultationRoutes = require('./consultation.route')
 const staffRoutes = require('./staff.route')
+const chatRoutes = require('./chat.route')
 
 const router = express.Router()
 
@@ -24,5 +25,6 @@ router.use('/health-news', healthNewsRoutes)
 router.use('/momo', momoRoutes)
 router.use('/consultations', consultationRoutes)
 router.use('/staff', staffRoutes)
+router.use('/chat', chatRoutes)
 
 module.exports = router

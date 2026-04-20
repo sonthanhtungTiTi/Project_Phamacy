@@ -1,0 +1,101 @@
+export type ChatConversationStatus = 'ai' | 'human_pending' | 'human' | 'closed'
+
+export interface ChatUserSummary {
+	id: string
+	fullName: string
+	email: string
+	phone?: string
+	role?: string
+}
+
+export interface ChatConversation {
+	id: string
+	sessionId: string
+	status: ChatConversationStatus
+	clientId: string
+	client: ChatUserSummary | null
+	assignedStaffId: string | null
+	assignedStaff: ChatUserSummary | null
+	lastIntent: string
+	lastAction: string
+	lastMessageAt: string
+	unreadForClient: number
+	unreadForAdmin: number
+	metadata: Record<string, unknown>
+	createdAt: string
+	updatedAt: string
+}
+
+export type ChatMessageSenderType = 'user' | 'bot' | 'admin' | 'system'
+
+export interface ChatMessage {
+	id: string
+	conversationId: string
+	senderType: ChatMessageSenderType
+	senderId: string | null
+	senderName: string
+	content: string
+	intent: string
+	action: string
+	meta: Record<string, unknown>
+	createdAt: string
+	updatedAt: string
+}
+
+export interface ChatConversationPayload {
+	conversation: ChatConversation
+	messages: ChatMessage[]
+}
+
+interface ApiResponse<T> {
+	success: boolean
+	message: string
+	data?: T
+	error?: string
+}
+
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api').replace(/\/$/, '')
+
+const getAuthHeaders = () => {
+	const token = localStorage.getItem('clientAccessToken')
+	if (!token) {
+		throw new Error('Vui long dang nhap de su dung tro chuyen')
+	}
+
+	return {
+		'Content-Type': 'application/json',
+		Authorization: `Bearer ${token}`,
+	}
+}
+
+const parseApiResponse = async <T>(response: Response): Promise<T> => {
+	const payload = (await response.json()) as ApiResponse<T>
+
+	if (!response.ok || !payload.success || !payload.data) {
+		throw new Error(payload.message || payload.error || 'Chat request failed')
+	}
+
+	return payload.data
+}
+
+export const getMyChatConversation = async (limit = 40) => {
+	const response = await fetch(`${API_BASE_URL}/client/chat/conversation?limit=${limit}`, {
+		method: 'GET',
+		headers: getAuthHeaders(),
+	})
+
+	return parseApiResponse<ChatConversationPayload>(response)
+}
+
+export const requestHumanSupport = async (conversationId: string, reason = '') => {
+	const response = await fetch(`${API_BASE_URL}/client/chat/request-human`, {
+		method: 'POST',
+		headers: getAuthHeaders(),
+		body: JSON.stringify({ conversationId, reason }),
+	})
+
+	return parseApiResponse<{
+		conversation: ChatConversation
+		systemMessage: ChatMessage | null
+	}>(response)
+}

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { useEffect, useState, useRef } from 'react'
 import io, { Socket } from 'socket.io-client'
 import { useAuthStore } from './stores/authStore'
@@ -18,10 +18,12 @@ import VideoCallOverlay from './components/calls/VideoCallOverlay'
 import FloatingAdminButton from './components/ui/FloatingAdminButton'
 import './App.css'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+const SOCKET_URL =
+  (import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/api\/?$/, '')
 
 function CallProvider({ children }: { children: React.ReactNode }) {
   const { token, user, isAuthenticated } = useAuthStore()
+  const navigate = useNavigate()
   const [socket, setSocket] = useState<Socket | null>(null)
   const socketRef = useRef<Socket | null>(null)
   const [callDuration, setCallDuration] = useState(0)
@@ -45,7 +47,7 @@ function CallProvider({ children }: { children: React.ReactNode }) {
       return
     }
 
-    const newSocket = io(API_URL, {
+    const newSocket = io(SOCKET_URL, {
       auth: { token },
       reconnection: true,
       reconnectionDelay: 1000,
@@ -145,9 +147,7 @@ function CallProvider({ children }: { children: React.ReactNode }) {
   }
 
   const handleFloatingViewCustomers = () => {
-    // Navigate to support page to view customers
-    window.history.pushState({}, '', '/customers')
-    window.dispatchEvent(new PopStateEvent('popstate'))
+    navigate('/customers')
   }
 
   return (
@@ -172,10 +172,12 @@ function CallProvider({ children }: { children: React.ReactNode }) {
         />
       )}
       {children}
-      <FloatingAdminButton
-        onCallCustomer={handleFloatingCallCustomer}
-        onViewCustomers={handleFloatingViewCustomers}
-      />
+      {isAuthenticated && (
+        <FloatingAdminButton
+          onCallCustomer={handleFloatingCallCustomer}
+          onViewCustomers={handleFloatingViewCustomers}
+        />
+      )}
     </>
   )
 }
@@ -284,8 +286,8 @@ function App() {
             }
           />
 
-          {/* Redirect root to login or dashboard based on auth state */}
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          {/* Redirect root based on auth state to avoid dashboard flash for logged-out users */}
+          <Route path="/" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />
           
           {/* Catch all */}
           <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />} />

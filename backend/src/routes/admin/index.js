@@ -11,6 +11,7 @@ const categoryRoutes = require('./category.route')
 const analyticsRoutes = require('./analytics.route')
 const inventoryRoutes = require('./inventory.route')
 const consultationRoutes = require('./consultation.route')
+const chatRoutes = require('./chat.route')
 
 const router = express.Router()
 
@@ -28,5 +29,6 @@ router.use('/categories', categoryRoutes)
 router.use('/analytics', analyticsRoutes)
 router.use('/inventory', inventoryRoutes)
 router.use('/consultations', consultationRoutes)
+router.use('/chat', chatRoutes)
 
 module.exports = router

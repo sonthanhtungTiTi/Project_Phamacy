@@ -16,7 +16,7 @@ const { errorHandler } = require('./src/middleware/errorHandler')
 dotenv.config()
 
 const app = express()
-const port = process.env.PORT || 3000
+const port = process.env.PORT || 3000   
 
 // Create HTTP server for Socket.IO
 const server = http.createServer(app)
