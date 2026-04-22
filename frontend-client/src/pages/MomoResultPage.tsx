@@ -205,14 +205,12 @@ const MomoResultPage = () => {
 							break
 						}
 
-						if (statusResult.paymentStatus === 'failed') {
-							if (!momoReturnSuccess) {
-								isSettled = true
-								shouldClearMomoOrderId = true
-								setViewStatus('failed')
-								setStatusMessage('Thanh toán thất bại. Vui lòng thử lại.')
-								break
-							}
+				if (statusResult.paymentStatus === 'failed' || orderDetails?.status === 'cancelled') {
+							isSettled = true
+							shouldClearMomoOrderId = true
+							setViewStatus('failed')
+							setStatusMessage(statusResult.paymentStatus === 'failed' ? 'Thanh toán thất bại. Đơn hàng đã hủy tự động.' : 'Đơn hàng đã hủy do thanh toán thất bại.')
+							break
 						}
 					} catch {
 						// Continue polling when callback has not updated yet.

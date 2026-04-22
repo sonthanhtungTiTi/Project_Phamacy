@@ -8,6 +8,7 @@ import {
 	type ChatConversation,
 	type ChatConversationPayload,
 	type ChatMessage,
+	type ChatProductSuggestion,
 	type ChatSendMessageResult,
 } from '../../services/chat.service'
 
@@ -51,6 +52,93 @@ const formatTime = (value: string) => {
 		hour: '2-digit',
 		minute: '2-digit',
 	})
+}
+
+const toCurrencyVnd = (value?: number) => {
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return ''
+	}
+
+	return `${Math.round(value).toLocaleString('vi-VN')} VND`
+}
+
+const normalizeImageUrl = (value: unknown): string => {
+	if (!value) {
+		return ''
+	}
+
+	if (Array.isArray(value)) {
+		const first = value.find((item) => typeof item === 'string' && item.trim())
+		return typeof first === 'string' ? first.trim() : ''
+	}
+
+	if (typeof value === 'string') {
+		const trimmed = value.trim()
+		if (!trimmed) {
+			return ''
+		}
+
+		if (trimmed.startsWith('[')) {
+			try {
+				const parsed = JSON.parse(trimmed)
+				return normalizeImageUrl(parsed)
+			} catch {
+				// Ignore and continue fallback parsing.
+			}
+		}
+
+		if (trimmed.includes(',')) {
+			const first = trimmed
+				.split(',')
+				.map((item) => item.trim())
+				.find(Boolean)
+			return first || ''
+		}
+
+		return trimmed
+	}
+
+	return ''
+}
+
+const parseProductSuggestions = (message: ChatMessage): ChatProductSuggestion[] => {
+	const meta = message.meta as { productSuggestions?: unknown }
+	if (!Array.isArray(meta?.productSuggestions)) {
+		return []
+	}
+
+	const parsedItems: Array<ChatProductSuggestion | null> = meta.productSuggestions
+		.map((item) => {
+			if (!item || typeof item !== 'object') {
+				return null
+			}
+
+			const candidate = item as Record<string, unknown>
+			const id = typeof candidate.id === 'string' ? candidate.id : ''
+			const productName = typeof candidate.productName === 'string' ? candidate.productName : ''
+			if (!id || !productName) {
+				return null
+			}
+
+			return {
+				id,
+				productName,
+				imageUrl: normalizeImageUrl(candidate.imageUrl) || undefined,
+				price: typeof candidate.price === 'number' ? candidate.price : undefined,
+				productUrl: typeof candidate.productUrl === 'string' ? candidate.productUrl : undefined,
+			} satisfies ChatProductSuggestion
+		})
+
+	return parsedItems.filter((item): item is ChatProductSuggestion => item !== null)
+}
+
+const openProductDetailFromChat = (productId: string) => {
+	if (!productId) {
+		return
+	}
+
+	window.history.pushState({}, '', `/product/${encodeURIComponent(productId)}`)
+	window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
 export default function ClientChatWidget({ socket, isOpen, onClose }: ClientChatWidgetProps) {
@@ -411,6 +499,9 @@ export default function ClientChatWidget({ socket, isOpen, onClose }: ClientChat
 											key={message.id}
 											className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
 										>
+											{(() => {
+												const productSuggestions = parseProductSuggestions(message)
+												return (
 											<div
 												className={`max-w-[82%] rounded-2xl px-3 py-2 shadow-sm ${
 													isUser
@@ -421,6 +512,30 @@ export default function ClientChatWidget({ socket, isOpen, onClose }: ClientChat
 												}`}
 											>
 												<p className="text-sm leading-5">{message.content}</p>
+												{productSuggestions.length > 0 && (
+													<div className="mt-3 grid gap-2">
+														{productSuggestions.map((product) => (
+															<button
+																type="button"
+																key={`${message.id}_${product.id}`}
+																onClick={() => openProductDetailFromChat(product.id)}
+																className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/70 p-2 text-left transition hover:border-blue-300 hover:bg-blue-100/70"
+															>
+																{product.imageUrl ? (
+																	<img src={product.imageUrl} alt={product.productName} className="h-14 w-14 rounded-lg object-cover" />
+																) : (
+																	<div className="h-14 w-14 rounded-lg bg-gradient-to-br from-slate-100 to-slate-200" />
+																)}
+																<div className="min-w-0">
+																	<p className="line-clamp-2 text-xs font-semibold text-slate-800">{product.productName}</p>
+																	{product.price !== undefined && (
+																		<p className="mt-1 text-xs font-medium text-rose-600">{toCurrencyVnd(product.price)}</p>
+																	)}
+																</div>
+															</button>
+														))}
+													</div>
+												)}
 												<div className={`mt-1 flex items-center gap-1 text-[10px] ${isUser || isAdmin ? 'text-white/80' : 'text-gray-500'}`}>
 													{isUser ? <UserRound className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
 													<span>{message.senderName || (isAdmin ? 'Nhan vien' : 'Tro ly')}</span>
@@ -428,6 +543,8 @@ export default function ClientChatWidget({ socket, isOpen, onClose }: ClientChat
 													<span>{formatTime(message.createdAt)}</span>
 												</div>
 											</div>
+												)
+											})()}
 										</div>
 									)
 								})}

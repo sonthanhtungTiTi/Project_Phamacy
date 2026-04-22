@@ -247,6 +247,10 @@ const cancelMyOrder = async (userId, orderId, { cancelReason } = {}) => {
 		throw new OrderServiceError('Order not found', 404)
 	}
 
+	if (order.paymentStatus === 'paid') {
+		throw new OrderServiceError('Cannot cancel paid order', 400)
+	}
+
 	if (order.status !== 'pending') {
 		throw new OrderServiceError('Only pending orders can be cancelled', 400)
 	}

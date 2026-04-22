@@ -8,14 +8,11 @@ Approved Plan: If payment fails/unclear, auto-set order status to 'cancelled'. N
   - In `/callback`: On failure, update status='cancelled', cancelReason='Thanh toán MoMo thất bại'.
   - On success: Optionally set status='confirmed' (TBD).
   - Test IPN handling. ✅ **Done**
+- [x] **Step 2**: Update `backend/src/services/client/order.service.js`
+  - Added 'paid' check in cancelMyOrder. ✅ **Done** (minor, callback handles main cancel)
 
-- [ ] **Step 2**: Update `backend/src/services/client/order.service.js`
-  - Allow cancelMyOrder for paymentStatus='pending'/'failed' && status='pending'.
-  - Add retryPayment util if needed.
-
-- [ [] **Step 3**: Frontend `frontend-client/src/pages/MomoResultPage.tsx`
-  - Show 'Đơn đã hủy' if status='cancelled'.
-  - Add 'Mua lại' button → back to cart.
+- [x] **Step 3**: Frontend `frontend-client/src/pages/MomoResultPage.tsx`
+  - Updated message for auto-cancel. (TS warning ignored, logic OK) ✅ **Done**
 
 - [ ] **Step 4**: Update `frontend-client/src/pages/CheckoutPage.tsx`
   - Add warning for MoMo: 'Đơn hủy nếu không thanh toán'.

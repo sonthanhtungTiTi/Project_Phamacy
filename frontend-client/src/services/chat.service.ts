@@ -28,6 +28,14 @@ export interface ChatConversation {
 
 export type ChatMessageSenderType = 'user' | 'bot' | 'admin' | 'system'
 
+export interface ChatProductSuggestion {
+	id: string
+	productName: string
+	imageUrl?: string
+	price?: number
+	productUrl?: string
+}
+
 export interface ChatMessage {
 	id: string
 	conversationId: string
@@ -37,7 +45,9 @@ export interface ChatMessage {
 	content: string
 	intent: string
 	action: string
-	meta: Record<string, unknown>
+	meta: Record<string, unknown> & {
+		productSuggestions?: ChatProductSuggestion[]
+	}
 	createdAt: string
 	updatedAt: string
 }

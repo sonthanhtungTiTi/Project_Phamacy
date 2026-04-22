@@ -75,6 +75,23 @@ const serializeMessage = (doc) => ({
 	updatedAt: doc.updatedAt,
 })
 
+const createTransientMessage = ({ conversationId, senderType, senderId = null, senderName = '', content, intent = '', action = '', meta = {} }) => {
+	const now = new Date().toISOString()
+	return {
+		id: `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+		conversationId: String(conversationId),
+		senderType,
+		senderId: senderId ? String(senderId) : null,
+		senderName: String(senderName || '').trim(),
+		content: String(content || '').trim(),
+		intent,
+		action,
+		meta,
+		createdAt: now,
+		updatedAt: now,
+	}
+}
+
 const createSessionId = (clientId) =>
 	`conv_${String(clientId)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
@@ -450,12 +467,60 @@ const extractOrderCode = (text) => {
 
 const normalizeText = (value) =>
 	String(value || '')
+		.replace(/[đĐ]/g, (char) => (char === 'Đ' ? 'D' : 'd'))
 		.normalize('NFD')
 		.replace(/[\u0300-\u036f]/g, '')
 		.toLowerCase()
 
 const PRODUCT_LOOKUP_HINT_REGEX = /\b(tim|tra\s?cuu|san\s?pham|thuoc|gia|hoat\s?chat|con\s?hang)\b/i
 const ORDER_LOOKUP_HINT_REGEX = /\b(don\s?hang|ma\s?don|trang\s?thai|van\s?don|giao\s?hang|thanh\s?toan|ord[0-9]{6,})\b/i
+const SYMPTOM_QUERY_HINT_REGEX = /\b(bi|dang bi|cam thay|met|khong khoe|trieu chung|dau|ho|sot|ngua|viem|tieu chay|buon non|chong mat)\b/i
+const SYMPTOM_KEYWORDS = [
+	'dau hong',
+	'nghet mui',
+	'so mui',
+	'kho tho',
+	'dau bung',
+	'dau dau',
+	'dau lung',
+	'dau rang',
+	'dau co',
+	'dau khop',
+	'dau vai',
+	'dau nguc',
+	'mat ngu',
+	'met moi',
+	'chong mat',
+	'buon non',
+	'non',
+	'tieu chay',
+	'tao bon',
+	'day bung',
+	'khong tieu',
+	'ho',
+	'sot',
+	'sỏt',
+	'cam',
+	'cum',
+	'di ung',
+	'ngua',
+	'man do',
+	'noi me day',
+	'viem',
+	'viem hong',
+	'viem mui',
+	'viem xoang',
+]
+
+const VIETNAMESE_CHAR_GROUPS = {
+	a: 'aAàáạảãâầấậẩẫăằắặẳẵ',
+	d: 'dDđĐ',
+	e: 'eEèéẹẻẽêềếệểễ',
+	i: 'iIìíịỉĩ',
+	o: 'oOòóọỏõôồốộổỗơờớợởỡ',
+	u: 'uUùúụủũưừứựửữ',
+	y: 'yYỳýỵỷỹ',
+}
 
 const formatCurrencyVnd = (value) => {
 	const amount = Number(value || 0)
@@ -464,6 +529,261 @@ const formatCurrencyVnd = (value) => {
 	}
 
 	return `${Math.round(amount).toLocaleString('vi-VN')} VND`
+}
+
+const normalizeImageField = (value) => {
+	if (!value) {
+		return ''
+	}
+
+	if (Array.isArray(value)) {
+		const first = value.find((item) => typeof item === 'string' && item.trim())
+		return first ? String(first).trim() : ''
+	}
+
+	if (typeof value === 'string') {
+		const trimmed = value.trim()
+		if (!trimmed) {
+			return ''
+		}
+
+		if (trimmed.startsWith('[')) {
+			try {
+				const parsed = JSON.parse(trimmed)
+				return normalizeImageField(parsed)
+			} catch {
+				// Ignore parse error and continue fallback parsing.
+			}
+		}
+
+		if (trimmed.includes(',')) {
+			const first = trimmed
+				.split(',')
+				.map((item) => item.trim())
+				.find(Boolean)
+			return first || ''
+		}
+
+		return trimmed
+	}
+
+	return ''
+}
+
+const extractSymptomKeyword = (text) => {
+	const normalized = normalizeText(text)
+	if (!normalized) {
+		return ''
+	}
+
+	const matched = [...SYMPTOM_KEYWORDS]
+		.sort((a, b) => b.length - a.length)
+		.find((keyword) => normalized.includes(normalizeText(keyword)))
+	if (matched) {
+		return matched
+	}
+
+	const longSymptomMatch = normalized.match(/\b(dau\s?[a-z]{2,}|viem\s?[a-z]{2,}|nghet\s?mui|so\s?mui|kho\s?tho|tieu\s?chay|buon\s?non|chong\s?mat|mat\s?ngu|met\s?moi)\b/)
+	if (longSymptomMatch) {
+		return String(longSymptomMatch[0]).trim()
+	}
+
+	const genericSymptomMatch = normalized.match(/\b(dau\s?[a-z]+|ho|sot|cam|cum|ngua|met\s?moi|chong\s?mat|buon\s?non|tieu\s?chay)\b/)
+	return genericSymptomMatch ? String(genericSymptomMatch[0]).trim() : ''
+}
+
+const buildVietnameseInsensitivePattern = (text) =>
+	String(text || '')
+		.split('')
+		.map((char) => {
+			if (/\s/.test(char)) {
+				return '\\s*'
+			}
+
+			const normalizedChar = normalizeText(char)
+			const group = VIETNAMESE_CHAR_GROUPS[normalizedChar]
+			if (group) {
+				return `[${escapeRegex(group)}]`
+			}
+
+			return escapeRegex(char)
+		})
+		.join('')
+
+const SYMPTOM_STOPWORDS = new Set(['toi', 'bi', 'dang', 'cam', 'thay', 'khong', 'khoe', 'minh'])
+
+const buildSymptomSearchQueries = ({ content = '', symptomKeyword = '', intentResult = null }) => {
+	const rawCandidates = [
+		symptomKeyword,
+		intentResult?.keyword,
+		intentResult?.query,
+		intentResult?.message,
+		content,
+	]
+
+	const queries = []
+	const seen = new Set()
+
+	for (const raw of rawCandidates) {
+		const normalized = normalizeText(raw)
+		if (!normalized) {
+			continue
+		}
+
+		const compact = normalized.replace(/\s+/g, ' ').trim()
+		if (compact.length >= 3 && !seen.has(compact)) {
+			seen.add(compact)
+			queries.push(compact)
+		}
+
+		const tokens = compact
+			.split(' ')
+			.filter((token) => token.length >= 3 && !SYMPTOM_STOPWORDS.has(token))
+
+		for (const token of tokens) {
+			if (!seen.has(token)) {
+				seen.add(token)
+				queries.push(token)
+			}
+		}
+	}
+
+	return queries.slice(0, 8)
+}
+
+const scoreSymptomMatch = (item, queryList) => {
+	const usage = normalizeText(item.productName)
+	const productName = normalizeText(item.productName || item.medicineName)
+	if (!usage && !productName) {
+		return 0
+	}
+
+	let score = 0
+
+	for (const query of queryList) {
+		const normalizedKeyword = normalizeText(query)
+		if (!normalizedKeyword) {
+			continue
+		}
+
+		if (usage.includes(normalizedKeyword)) {
+			score += 120
+		}
+		if (productName.includes(normalizedKeyword)) {
+			score += 70
+		}
+
+		const tokens = normalizedKeyword
+			.split(/\s+/)
+			.filter((token) => token.length >= 3 && !SYMPTOM_STOPWORDS.has(token))
+
+		let tokenMatched = 0
+		for (const token of tokens) {
+			if (usage.includes(token)) {
+				score += 30
+				tokenMatched += 1
+			}
+			if (productName.includes(token)) {
+				score += 20
+				tokenMatched += 1
+			}
+		}
+
+		if (tokens.length > 1 && tokenMatched >= tokens.length) {
+			score += 40
+		}
+	}
+
+	return score
+}
+
+const searchProductsBySymptom = async (queryInput) => {
+	const queryList = Array.isArray(queryInput)
+		? queryInput.map((item) => normalizeText(item)).filter(Boolean)
+		: [normalizeText(queryInput)].filter(Boolean)
+
+	if (queryList.length === 0) {
+		return []
+	}
+
+	const phraseFilters = []
+	for (const query of queryList) {
+		const mongoRegex = new RegExp(buildVietnameseInsensitivePattern(query), 'i')
+		phraseFilters.push({ productName: { $regex: mongoRegex } })
+		phraseFilters.push({ medicineName: { $regex: mongoRegex } })
+
+		const tokens = query.split(/\s+/).filter((token) => token.length >= 3)
+		for (const token of tokens) {
+			const tokenRegex = new RegExp(buildVietnameseInsensitivePattern(token), 'i')
+			phraseFilters.push({ productName: { $regex: tokenRegex } })
+			phraseFilters.push({ medicineName: { $regex: tokenRegex } })
+		}
+	}
+
+	const directMatches = await Product.find({
+		isActive: true,
+		$or: phraseFilters,
+	})
+		.select('_id productName medicineName images price usageSummary updatedAt')
+		.limit(120)
+		.lean()
+
+	let merged = directMatches
+
+	if (merged.length < 4) {
+		const fallbackCandidates = await Product.find({
+			isActive: true,
+			usageSummary: { $exists: true, $ne: '' },
+		})
+			.select('_id productName medicineName images price usageSummary updatedAt')
+			.sort({ updatedAt: -1 })
+			.limit(300)
+			.lean()
+
+		const knownIds = new Set(merged.map((item) => String(item._id)))
+		const filtered = fallbackCandidates.filter((item) => !knownIds.has(String(item._id)))
+		merged = merged.concat(filtered)
+	}
+
+	return merged
+		.map((item) => ({
+			id: String(item._id),
+			productName: item.productName || item.medicineName || 'San pham',
+			imageUrl: normalizeImageField(item.images),
+			price: Number(item.price || 0),
+			score: scoreSymptomMatch(item, queryList),
+			updatedAt: item.updatedAt,
+		}))
+		.filter((item) => item.score > 0)
+		.sort((a, b) => {
+			if (b.score !== a.score) {
+				return b.score - a.score
+			}
+			return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+		})
+		.slice(0, 4)
+		.map((item) => ({
+			id: item.id,
+			productName: item.productName,
+			imageUrl: item.imageUrl,
+			price: item.price,
+		}))
+}
+
+const toProductLinkReply = (products) => {
+	if (!Array.isArray(products) || products.length === 0) {
+		return 'Không tìm thấy sản phẩm phù hợp'
+	}
+
+	return products.map((item) => `http://localhost:5173/product/${item.id}`).join('\n')
+}
+
+const formatProductSuggestionText = (products) => {
+	if (!Array.isArray(products) || products.length === 0) {
+		return 'Không tìm thấy sản phẩm phù hợp'
+	}
+
+	return 'Mình đã tìm thấy một số sản phẩm phù hợp. Bạn có thể bấm vào thẻ sản phẩm bên dưới để xem chi tiết.'
 }
 
 const searchProducts = async (query) => {
@@ -477,7 +797,6 @@ const searchProducts = async (query) => {
 			{ medicineName: regex },
 			{ medicineCode: regex },
 			{ categoryName: regex },
-			{ usageSummary: regex },
 			{ brand: regex },
 		]
 	}
@@ -610,23 +929,34 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 		})
 	}
 
-	const userMessageDoc = await appendMessage({
-		conversationId: conversation._id,
-		senderType: 'user',
-		senderId: clientId,
-		senderName: String(clientName || '').trim(),
-		content,
-	})
-
 	let hydratedConversation = await ChatConversation.findById(conversation._id)
 		.populate('clientId', 'fullName email phone role')
 		.populate('assignedStaffId', 'fullName email phone role')
 	const isHumanPending = hydratedConversation.status === 'human_pending'
+	const isHumanConversation = hydratedConversation.status === 'human'
 
-	if (hydratedConversation.status === 'human') {
+	const userMessagePayload = isHumanConversation
+		? serializeMessage(
+				await appendMessage({
+					conversationId: conversation._id,
+					senderType: 'user',
+					senderId: clientId,
+					senderName: String(clientName || '').trim(),
+					content,
+				}),
+			)
+		: createTransientMessage({
+				conversationId: conversation._id,
+				senderType: 'user',
+				senderId: clientId,
+				senderName: String(clientName || '').trim(),
+				content,
+			})
+
+	if (isHumanConversation) {
 		return {
 			conversation: serializeConversation(hydratedConversation),
-			userMessage: serializeMessage(userMessageDoc),
+			userMessage: userMessagePayload,
 			botMessage: null,
 			systemMessage: null,
 			requiresHuman: false,
@@ -666,6 +996,100 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 			query: '',
 			message: '',
 			reason: 'classification_failed',
+		}
+	}
+
+	const symptomKeyword = extractSymptomKeyword(content)
+	const hasSymptomHint = SYMPTOM_QUERY_HINT_REGEX.test(normalizeText(content))
+	if (symptomKeyword) {
+		const productMatches = await searchProductsBySymptom(
+			buildSymptomSearchQueries({
+				content,
+				symptomKeyword,
+				intentResult,
+			}),
+		)
+		const botReply = formatProductSuggestionText(productMatches)
+
+		const botPayload = createTransientMessage({
+			conversationId: conversation._id,
+			senderType: 'bot',
+			content: botReply,
+			intent: INTENTS.QUERY_PRODUCT,
+			action: INTENTS.FIND_PRODUCT,
+			meta: {
+				symptomKeyword,
+				matcher: 'usageSummary_regex_fuzzy',
+				productSuggestions: productMatches.map((item) => ({
+					id: item.id,
+					productName: item.productName,
+					imageUrl: item.imageUrl,
+					price: item.price,
+					productUrl: `http://localhost:5173/product/${item.id}`,
+				})),
+			},
+		})
+
+		const nextStatus = isHumanPending ? 'human_pending' : 'ai'
+		const updatedConversation = await touchConversation(conversation._id, {
+			status: nextStatus,
+			lastIntent: INTENTS.QUERY_PRODUCT,
+			lastAction: INTENTS.FIND_PRODUCT,
+		})
+
+		return {
+			conversation: serializeConversation(updatedConversation),
+			userMessage: userMessagePayload,
+			botMessage: botPayload,
+			systemMessage: null,
+			requiresHuman: nextStatus === 'human_pending',
+			action: INTENTS.FIND_PRODUCT,
+		}
+	}
+
+	if (hasSymptomHint) {
+		const productMatches = await searchProductsBySymptom(
+			buildSymptomSearchQueries({
+				content,
+				symptomKeyword: normalizeText(content),
+				intentResult,
+			}),
+		)
+		const botReply = formatProductSuggestionText(productMatches)
+
+		const botPayload = createTransientMessage({
+			conversationId: conversation._id,
+			senderType: 'bot',
+			content: botReply,
+			intent: INTENTS.QUERY_PRODUCT,
+			action: INTENTS.FIND_PRODUCT,
+			meta: {
+				symptomKeyword: normalizeText(content),
+				matcher: 'symptom_hint_usageSummary_regex_fuzzy',
+				productSuggestions: productMatches.map((item) => ({
+					id: item.id,
+					productName: item.productName,
+					imageUrl: item.imageUrl,
+					price: item.price,
+					productUrl: `http://localhost:5173/product/${item.id}`,
+				})),
+			},
+		})
+
+		const nextStatus = isHumanPending ? 'human_pending' : 'ai'
+		const updatedConversation = await touchConversation(conversation._id, {
+			status: nextStatus,
+			lastIntent: INTENTS.QUERY_PRODUCT,
+			lastAction: INTENTS.FIND_PRODUCT,
+		})
+
+		return {
+			conversation: serializeConversation(updatedConversation),
+			userMessage: userMessagePayload,
+			botMessage: botPayload,
+			systemMessage: null,
+			requiresHuman: nextStatus === 'human_pending',
+			action: INTENTS.FIND_PRODUCT,
 		}
 	}
 
@@ -711,7 +1135,7 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 
 		return {
 			conversation: humanFlow.conversation,
-			userMessage: serializeMessage(userMessageDoc),
+			userMessage: userMessagePayload,
 			botMessage: serializeMessage(botDoc),
 			systemMessage: humanFlow.systemMessage,
 			requiresHuman: true,
@@ -789,7 +1213,7 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 		botReply = `Nhan vien dang duoc ket noi. ${botReply}`
 	}
 
-	const botDoc = await appendMessage({
+	const botPayload = createTransientMessage({
 		conversationId: conversation._id,
 		senderType: 'bot',
 		content: botReply,
@@ -813,8 +1237,8 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 
 	return {
 		conversation: serializeConversation(updatedConversation),
-		userMessage: serializeMessage(userMessageDoc),
-		botMessage: serializeMessage(botDoc),
+		userMessage: userMessagePayload,
+		botMessage: botPayload,
 		systemMessage: null,
 		requiresHuman: nextStatus === 'human_pending',
 		action,

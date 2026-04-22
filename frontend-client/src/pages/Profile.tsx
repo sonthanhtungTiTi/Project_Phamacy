@@ -938,7 +938,7 @@ function Profile({ user, onClose, onSave, mode = 'modal', initialSection = 'orde
 													<p className="font-semibold text-slate-800">Thông tin nhận hàng</p>
 													<p className="mt-1">{selectedOrderDetail.shippingAddress.recipientName} - {selectedOrderDetail.shippingAddress.phone}</p>
 													<p className="mt-1">{selectedOrderDetail.shippingAddress.fullAddress}</p>
-													<p className="mt-1">Ghi chú: {selectedOrderDetail.note || 'Không có'}</p>
+													<p className="mt-1">Ghi chú: {selectedOrderDetail.note || 'Không có'} {selectedOrderDetail.cancelReason ? `(Hủy: ${selectedOrderDetail.cancelReason})` : ''}</p>
 												</div>
 											</div>
 

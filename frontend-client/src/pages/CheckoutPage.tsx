@@ -32,7 +32,7 @@ const paymentMethodOptions: Array<{ value: PaymentMethod; label: string; descrip
 	{
 		value: 'momo',
 		label: 'Momo',
-		description: 'Thanh toán qua ứng dụng Momo - nhanh, an toàn.',
+		description: 'Thanh toán qua ứng dụng Momo - nhanh, an toàn. *Đơn tự hủy nếu không thanh toán.',
 	},
 ]
 
