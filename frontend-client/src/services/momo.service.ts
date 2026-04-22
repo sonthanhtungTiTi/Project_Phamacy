@@ -2,6 +2,16 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 const getAccessToken = () => localStorage.getItem('clientAccessToken') || '';
 
+export class MomoPaymentError extends Error {
+  resultCode: number | null
+
+  constructor(message: string, resultCode: number | null = null) {
+    super(message)
+    this.name = 'MomoPaymentError'
+    this.resultCode = resultCode
+  }
+}
+
 /**
  * Tạo Momo payment URL
  * @param {string} orderId - ID của order
@@ -24,9 +34,10 @@ export const createMomoPayment = async (orderId: string, amount: number, orderIn
     });
 
     const data = await response.json().catch(() => null);
+    const resultCode = typeof data?.resultCode === 'number' ? data.resultCode : null;
 
     if (!response.ok || !data?.success) {
-      throw new Error(data?.message || 'Failed to create Momo payment');
+      throw new MomoPaymentError(data?.message || 'Failed to create Momo payment', resultCode);
     }
 
     return data;

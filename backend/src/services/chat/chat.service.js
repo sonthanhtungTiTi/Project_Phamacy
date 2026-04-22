@@ -5,7 +5,7 @@ const ChatMessage = require('../../models/chatMessage.model')
 const Product = require('../../models/product.model')
 const Order = require('../../models/order.model')
 const User = require('../../models/user.model')
-const { INTENTS, classifyIntent, generateReplyFromData } = require('../ai/ollama.service')
+const { INTENTS, classifyIntent, generateReplyFromData, generatePhase2Reply } = require('../ai/ollama.service')
 
 class ChatServiceError extends Error {
 	constructor(message, statusCode = 400) {
@@ -752,8 +752,17 @@ const handleClientMessage = async ({ clientId, clientName = '', conversationId, 
 	let usedFallbackReply = false
 	try {
 		if (action === INTENTS.CHAT && intentResult.message && !inferredProductLookup && !inferredOrderLookup) {
+			// Direct reply from AI classification
 			botReply = intentResult.message
+		} else if ((action === INTENTS.FIND_PRODUCT || action === INTENTS.QUERY_PRODUCT) && Array.isArray(dataPayload.products) && dataPayload.products.length > 0) {
+			// Phase 2: Format product data + generate structured reply
+			botReply = await generatePhase2Reply({
+				userMessage: content,
+				products: dataPayload.products,
+				contextNote: contextNoteParts.join(' '),
+			})
 		} else {
+			// Fallback to general data-driven generation
 			botReply = await generateReplyFromData({
 				userMessage: content,
 				intent: intentResult.intent,

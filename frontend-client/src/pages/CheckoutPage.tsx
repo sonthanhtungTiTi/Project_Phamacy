@@ -3,7 +3,7 @@ import PharmacyLayout from '../components/layout/layout'
 import { useAddress } from '../hooks/useAddress'
 import { useCart } from '../hooks/useCart'
 import { checkoutFromCart } from '../services/order.service'
-import { createMomoPayment } from '../services/momo.service'
+import { MomoPaymentError, createMomoPayment } from '../services/momo.service'
 import type { PaymentMethod } from '../services/order.service'
 
 interface CheckoutPageProps {
@@ -175,8 +175,17 @@ function CheckoutPage({ onBackToCart, onBackHome }: CheckoutPageProps) {
 					throw new Error('Khong nhan duoc link thanh toan Momo')
 				} catch (momoError) {
 					console.error('Momo redirect error:', momoError)
-					const momoMessage = momoError instanceof Error ? momoError.message : 'Khong tao duoc lien ket thanh toan Momo'
-					setSubmitError(`${momoMessage}. Đơn hàng ${order.orderCode} đã được tạo, vui lòng thử lại thanh toán Momo.`)
+					const momoMessage =
+						momoError instanceof MomoPaymentError && momoError.resultCode === 98
+							? 'MoMo dang ban tao QR, vui long thu lai sau vai giay'
+							: momoError instanceof Error
+								? momoError.message
+								: 'Khong tao duoc lien ket thanh toan Momo'
+
+					const normalizedMomoMessage = momoMessage.trim().replace(/[.\s]+$/g, '')
+					setSubmitError(
+						`${normalizedMomoMessage}. Đơn hàng ${order.orderCode} đã được tạo, vui lòng thử lại thanh toán Momo.`
+					)
 					return
 				}
 			}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -19,7 +19,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Typography from '@mui/material/Typography'
 import { styled, useTheme } from '@mui/material/styles'
 import type { Theme } from '@mui/material/styles'
-import { BarChart } from '@mui/x-charts/BarChart'
+import { BarChart, barClasses } from '@mui/x-charts/BarChart'
 import { PieChart, pieClasses } from '@mui/x-charts/PieChart'
 import { useAuthStore } from '../stores/authStore'
 import analyticsService from '../services/analytics.service'
@@ -33,6 +33,12 @@ const ChartPanel = styled(Box)(({ theme }: { theme: Theme }) => ({
   padding: theme.spacing(2.5),
 }))
 
+const CHART_SLOW_ANIMATION_MS = 950
+
+const easeOutCubic = (progress: number) => 1 - Math.pow(1 - progress, 3)
+
+const formatInlineCurrency = (value: number) => `${new Intl.NumberFormat('vi-VN').format(value)}đ`
+
 export default function Dashboard() {
   const { user } = useAuthStore()
   const theme = useTheme()
@@ -42,11 +48,20 @@ export default function Dashboard() {
   const [lowStock, setLowStock] = useState<LowStockProduct[]>([])
   const [topProducts, setTopProducts] = useState<TopProduct[]>([])
   const [revenueData, setRevenueData] = useState<RevenueDataPoint[]>([])
+  const [animatedRevenueBarDataset, setAnimatedRevenueBarDataset] = useState<Array<{ label: string; revenue: number }>>([])
+  const [animatedTopProductDataset, setAnimatedTopProductDataset] = useState<Array<{ name: string; sold: number }>>([])
+  const [animatedOrderStatusPieData, setAnimatedOrderStatusPieData] = useState<Array<{ id: number; value: number; label: string; color: string }>>([])
   const [revenueDays, setRevenueDays] = useState<7 | 14 | 30>(7)
   const [revenueLoading, setRevenueLoading] = useState(false)
   const [revenueError, setRevenueError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const revenueAnimationFrameRef = useRef<number | null>(null)
+  const topProductsAnimationFrameRef = useRef<number | null>(null)
+  const pieAnimationFrameRef = useRef<number | null>(null)
+  const revenueAnimatedRef = useRef<Array<{ label: string; revenue: number }>>([])
+  const topProductsAnimatedRef = useRef<Array<{ name: string; sold: number }>>([])
+  const pieAnimatedRef = useRef<Array<{ id: number; value: number; label: string; color: string }>>([])
 
   useEffect(() => {
     loadDashboard()
@@ -123,28 +138,6 @@ export default function Dashboard() {
     return labels[status] || status
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-500">Đang tải dashboard...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-        <p className="text-red-600 mb-4">{error}</p>
-        <button onClick={loadDashboard} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
-          Thử lại
-        </button>
-      </div>
-    )
-  }
-
   const revenueStats = stats?.revenue ?? { total: 0, today: 0, thisMonth: 0 }
   const orderStats = stats?.orders ?? { total: 0, today: 0, thisMonth: 0, byStatus: {} as Record<string, number> }
   const userStats = stats?.users ?? { total: 0, newThisMonth: 0 }
@@ -177,6 +170,10 @@ export default function Dashboard() {
     ].filter((item) => item.value > 0)
   }, [stats])
 
+  const orderStatusValueById = useMemo(() => {
+    return new Map(orderStatusPieData.map((item) => [String(item.id), Number(item.value || 0)]))
+  }, [orderStatusPieData])
+
   const topProductDataset = useMemo(
     () => topProducts.slice(0, 5).map((item) => ({
       name: (item?.productName || 'Sản phẩm').length > 24
@@ -187,8 +184,180 @@ export default function Dashboard() {
     [topProducts],
   )
 
+  useEffect(() => {
+    if (revenueAnimationFrameRef.current) {
+      cancelAnimationFrame(revenueAnimationFrameRef.current)
+      revenueAnimationFrameRef.current = null
+    }
+
+    if (revenueBarDataset.length === 0) {
+      setAnimatedRevenueBarDataset([])
+      revenueAnimatedRef.current = []
+      return
+    }
+
+    const fromValues = revenueBarDataset.map((_item, index) => revenueAnimatedRef.current[index]?.revenue ?? 0)
+    const startedAt = performance.now()
+
+    const animate = (now: number) => {
+      const progress = Math.min((now - startedAt) / CHART_SLOW_ANIMATION_MS, 1)
+      const eased = easeOutCubic(progress)
+
+      const nextFrame = revenueBarDataset.map((item, index) => ({
+        ...item,
+        revenue: Math.round(fromValues[index] + (item.revenue - fromValues[index]) * eased),
+      }))
+
+      revenueAnimatedRef.current = nextFrame
+      setAnimatedRevenueBarDataset(nextFrame)
+
+      if (progress < 1) {
+        revenueAnimationFrameRef.current = requestAnimationFrame(animate)
+      } else {
+        revenueAnimationFrameRef.current = null
+      }
+    }
+
+    revenueAnimationFrameRef.current = requestAnimationFrame(animate)
+
+    return () => {
+      if (revenueAnimationFrameRef.current) {
+        cancelAnimationFrame(revenueAnimationFrameRef.current)
+        revenueAnimationFrameRef.current = null
+      }
+    }
+  }, [revenueBarDataset])
+
+  useEffect(() => {
+    if (topProductsAnimationFrameRef.current) {
+      cancelAnimationFrame(topProductsAnimationFrameRef.current)
+      topProductsAnimationFrameRef.current = null
+    }
+
+    if (topProductDataset.length === 0) {
+      setAnimatedTopProductDataset([])
+      topProductsAnimatedRef.current = []
+      return
+    }
+
+    const fromValues = topProductDataset.map((_item, index) => topProductsAnimatedRef.current[index]?.sold ?? 0)
+    const startedAt = performance.now()
+
+    const animate = (now: number) => {
+      const progress = Math.min((now - startedAt) / CHART_SLOW_ANIMATION_MS, 1)
+      const eased = easeOutCubic(progress)
+
+      const nextFrame = topProductDataset.map((item, index) => ({
+        ...item,
+        sold: Math.round(fromValues[index] + (item.sold - fromValues[index]) * eased),
+      }))
+
+      topProductsAnimatedRef.current = nextFrame
+      setAnimatedTopProductDataset(nextFrame)
+
+      if (progress < 1) {
+        topProductsAnimationFrameRef.current = requestAnimationFrame(animate)
+      } else {
+        topProductsAnimationFrameRef.current = null
+      }
+    }
+
+    topProductsAnimationFrameRef.current = requestAnimationFrame(animate)
+
+    return () => {
+      if (topProductsAnimationFrameRef.current) {
+        cancelAnimationFrame(topProductsAnimationFrameRef.current)
+        topProductsAnimationFrameRef.current = null
+      }
+    }
+  }, [topProductDataset])
+
+  useEffect(() => {
+    if (pieAnimationFrameRef.current) {
+      cancelAnimationFrame(pieAnimationFrameRef.current)
+      pieAnimationFrameRef.current = null
+    }
+
+    if (orderStatusPieData.length === 0) {
+      setAnimatedOrderStatusPieData([])
+      pieAnimatedRef.current = []
+      return
+    }
+
+    const previousById = new Map(pieAnimatedRef.current.map((item) => [String(item.id), Number(item.value || 0)]))
+    const fromValues = orderStatusPieData.map((item) => previousById.get(String(item.id)) ?? 0)
+    const startedAt = performance.now()
+
+    const animate = (now: number) => {
+      const progress = Math.min((now - startedAt) / CHART_SLOW_ANIMATION_MS, 1)
+      const eased = easeOutCubic(progress)
+
+      const nextFrame = orderStatusPieData.map((item, index) => ({
+        ...item,
+        value: Math.round(fromValues[index] + (item.value - fromValues[index]) * eased),
+      }))
+
+      pieAnimatedRef.current = nextFrame
+      setAnimatedOrderStatusPieData(nextFrame)
+
+      if (progress < 1) {
+        pieAnimationFrameRef.current = requestAnimationFrame(animate)
+      } else {
+        pieAnimationFrameRef.current = null
+      }
+    }
+
+    pieAnimationFrameRef.current = requestAnimationFrame(animate)
+
+    return () => {
+      if (pieAnimationFrameRef.current) {
+        cancelAnimationFrame(pieAnimationFrameRef.current)
+        pieAnimationFrameRef.current = null
+      }
+    }
+  }, [orderStatusPieData])
+
+  // Early returns must come AFTER all hooks are called
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-500">Đang tải dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+        <p className="text-red-600 mb-4">{error}</p>
+        <button onClick={loadDashboard} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+          Thử lại
+        </button>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-6">
+    <>
+      {loading ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-500">Đang tải dashboard...</p>
+          </div>
+        </div>
+      ) : error ? (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button onClick={loadDashboard} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+            Thử lại
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -246,7 +415,7 @@ export default function Dashboard() {
               <div className="h-[320px] flex items-center justify-center text-sm text-gray-500">Chưa có dữ liệu doanh thu trong khoảng thời gian này.</div>
             ) : (
               <BarChart
-                dataset={revenueBarDataset}
+                dataset={animatedRevenueBarDataset}
                 xAxis={[{ scaleType: 'band', dataKey: 'label', tickLabelStyle: { fontSize: 11 } }]}
                 yAxis={[{
                   tickLabelStyle: { fontSize: 11 },
@@ -257,10 +426,28 @@ export default function Dashboard() {
                   label: 'Doanh thu (VND)',
                   color: theme.palette.success.main,
                   valueFormatter: (value) => formatCurrency(Number(value || 0)),
+                  barLabel: (item) => {
+                    const numericValue = Number(revenueBarDataset[item.dataIndex]?.revenue || 0)
+                    if (numericValue <= 0) {
+                      return null
+                    }
+
+                    return formatInlineCurrency(numericValue)
+                  },
+                  barLabelPlacement: 'center',
                 }]}
                 margin={{ top: 20, right: 20, bottom: 60, left: 80 }}
                 grid={{ horizontal: true }}
                 height={320}
+                skipAnimation
+                sx={{
+                  [`& .${barClasses.label}`]: {
+                    fill: '#ffffff',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    pointerEvents: 'none',
+                  },
+                }}
               />
             )}
           </ChartPanel>
@@ -284,14 +471,24 @@ export default function Dashboard() {
                 height={320}
                 margin={{ top: 20, bottom: 20, left: 10, right: 120 }}
                 series={[{
-                  data: orderStatusPieData,
+                  data: animatedOrderStatusPieData,
                   innerRadius: 56,
                   outerRadius: 98,
                   paddingAngle: 3,
                   cornerRadius: 4,
+                  arcLabel: (item) => {
+                    const trueValue = orderStatusValueById.get(String(item.id)) ?? Number(item.value || 0)
+                    if (trueValue <= 0) {
+                      return ''
+                    }
+
+                    return new Intl.NumberFormat('vi-VN').format(trueValue)
+                  },
+                  arcLabelMinAngle: 12,
                   cx: 120,
                   cy: 150,
                 }]}
+                skipAnimation
                 slotProps={{
                   legend: {
                     direction: 'vertical',
@@ -302,6 +499,12 @@ export default function Dashboard() {
                   [`& .${pieClasses.series} path`]: {
                     stroke: '#fff',
                     strokeWidth: 1,
+                  },
+                  [`& .${pieClasses.arcLabel}`]: {
+                    fill: '#ffffff',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    pointerEvents: 'none',
                   },
                 }}
               />
@@ -318,7 +521,7 @@ export default function Dashboard() {
           <div className="h-[320px] flex items-center justify-center text-sm text-gray-500">Chưa có dữ liệu sản lượng sản phẩm.</div>
         ) : (
           <BarChart
-            dataset={topProductDataset}
+            dataset={animatedTopProductDataset}
             layout="horizontal"
             yAxis={[{ scaleType: 'band', dataKey: 'name', width: 170, tickLabelStyle: { fontSize: 11 } }]}
             xAxis={[{ tickLabelStyle: { fontSize: 11 } }]}
@@ -327,10 +530,28 @@ export default function Dashboard() {
               label: 'Số lượng bán',
               color: theme.palette.primary.main,
               valueFormatter: (value) => `${Number(value || 0)} sản phẩm`,
+              barLabel: (item) => {
+                const numericValue = Number(topProductDataset[item.dataIndex]?.sold || 0)
+                if (numericValue <= 0) {
+                  return null
+                }
+
+                return new Intl.NumberFormat('vi-VN').format(numericValue)
+              },
+              barLabelPlacement: 'center',
             }]}
             margin={{ top: 20, right: 20, bottom: 40, left: 20 }}
             grid={{ vertical: true }}
             height={320}
+            skipAnimation
+            sx={{
+              [`& .${barClasses.label}`]: {
+                fill: '#ffffff',
+                fontSize: 11,
+                fontWeight: 700,
+                pointerEvents: 'none',
+              },
+            }}
           />
         )}
       </ChartPanel>
@@ -472,6 +693,8 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-    </div>
+        </div>
+      )}
+    </>
   )
 }

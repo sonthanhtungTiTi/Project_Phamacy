@@ -33,7 +33,7 @@ const io = new Server(server, {
     pingTimeout: 20000,
 })
 
-// Setup WebRTC call signaling handlers (ZELO-style)
+// Setup Socket.IO call signaling handlers for PeerJS
 setupCallHandlers(io)
 
 // Make io available to routes if needed

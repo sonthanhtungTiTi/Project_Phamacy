@@ -4,6 +4,20 @@ const { createMomoPayment, handleMomoCallback } = require('../../services/client
 const Order = require('../../models/order.model');
 const { authenticateClientJwt } = require('../../middleware/auth.middleware');
 
+const parseMomoExtraData = (value) => {
+  if (!value || typeof value !== 'string') {
+    return {};
+  }
+
+  try {
+    const decoded = Buffer.from(value, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
 /**
  * POST /api/client/momo/create-payment
  * Bước 1: User chọn Momo → Frontend gọi API này
@@ -12,11 +26,30 @@ const { authenticateClientJwt } = require('../../middleware/auth.middleware');
  */
 router.post('/create-payment', authenticateClientJwt, async (req, res) => {
   try {
-    const { orderId, amount, orderInfo } = req.body;
+    const { orderId, orderInfo } = req.body;
 
     // Validate
-    if (!orderId || !amount) {
-      return res.status(400).json({ message: 'Missing orderId or amount' });
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: 'Missing orderId' });
+    }
+
+    const order = await Order.findOne({
+      _id: orderId,
+      userId: req.auth.userId,
+    }).select('orderCode totalAmount paymentStatus');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found',
+      });
+    }
+
+    if (order.paymentStatus === 'paid' || order.status === 'cancelled') {
+      return res.status(409).json({
+        success: false,
+        message: 'Cannot create payment for paid or cancelled order',
+      });
     }
 
     const fallbackRedirectUrl = 'http://localhost:5173/checkout/momo-return';
@@ -25,15 +58,16 @@ router.post('/create-payment', authenticateClientJwt, async (req, res) => {
     const ipnUrl = (process.env.MOMO_IPN_URL || fallbackIpnUrl).trim();
 
     const momoPaymentData = {
-      orderId: orderId,
-      amount: parseInt(amount, 10),
-      orderInfo: orderInfo || `Thanh toán đơn hàng #${orderId}`,
+      orderId: String(order._id),
+      amount: order.totalAmount,
+      orderInfo: orderInfo || `Thanh toan don hang #${order.orderCode}`,
       redirectUrl,
       ipnUrl,
-      extraData: JSON.stringify({
+      extraData: {
         userId: req.auth.userId,
-        orderId: orderId,
-      }),
+        orderId: String(order._id),
+        orderCode: order.orderCode,
+      },
     };
 
     // Call Momo service
@@ -42,14 +76,14 @@ router.post('/create-payment', authenticateClientJwt, async (req, res) => {
     if (momoResponse.success) {
       // Cập nhật order status thành 'pending_payment'
       await Order.updateOne(
-        { _id: orderId },
+        { _id: order._id },
         { paymentStatus: 'pending', paymentMethod: 'momo' }
       );
 
       res.json({
         success: true,
         payUrl: momoResponse.payUrl, // Frontend sẽ redirect đến URL này
-        orderId: orderId,
+        orderId: String(order._id),
       });
     } else {
       res.status(400).json({
@@ -58,10 +92,18 @@ router.post('/create-payment', authenticateClientJwt, async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Create Momo payment error:', error.message);
-    res.status(500).json({
+    const momoResultCode = error?.momoResultCode ?? null;
+    const baseMessage = error?.message || 'Failed to create Momo payment';
+    const retryHint =
+      Number(momoResultCode) === 98
+        ? 'MoMo dang ban tao QR, vui long thu lai sau vai giay.'
+        : '';
+
+    console.error('Create Momo payment error:', baseMessage);
+    res.status(502).json({
       success: false,
-      message: error.message,
+      message: retryHint ? `${baseMessage}. ${retryHint}` : baseMessage,
+      resultCode: momoResultCode,
     });
   }
 });
@@ -74,37 +116,45 @@ router.post('/create-payment', authenticateClientJwt, async (req, res) => {
 router.post('/callback', async (req, res) => {
   try {
     const momoData = req.body;
+    const extraData = parseMomoExtraData(momoData.extraData);
 
     // Handle callback
     const result = handleMomoCallback(momoData);
+    const targetOrderId = extraData.orderId || result.orderId;
+
+    if (!targetOrderId) {
+      return res.status(204).send();
+    }
 
     if (result.success) {
-      // User thanh toán thành công → cập nhật order
+      // Thanh toán thành công → cập nhật payment
       await Order.updateOne(
-        { _id: result.orderId },
+        { _id: targetOrderId },
         {
           paymentStatus: 'paid',
           transactionId: result.transactionId,
           paymentDate: new Date(),
         }
       );
-
-      console.log(`✅ Momo payment success for order: ${result.orderId}`);
+      console.log(`✅ MoMo success for order ${targetOrderId}, awaiting admin confirmation`);
     } else {
-      // Thanh toán thất bại
+      // Thất bại → hủy đơn tự động
       await Order.updateOne(
-        { _id: result.orderId },
-        { paymentStatus: 'failed' }
+        { _id: targetOrderId },
+        { 
+          paymentStatus: 'failed',
+          status: 'cancelled',
+          cancelReason: 'Thanh toán MoMo thất bại'
+        }
       );
-
-      console.log(`❌ Momo payment failed for order: ${result.orderId}`);
+      console.log(`❌ MoMo failed for order ${targetOrderId} - AUTO CANCELLED`);
     }
 
-    // Always return 200 to Momo
-    res.json({ status: 'received' });
+    // Always return 204 to MoMo when callback is received
+    return res.status(204).send();
   } catch (error) {
     console.error('Momo callback error:', error.message);
-    res.json({ status: 'received' }); // Return 200 anyway
+    return res.status(204).send();
   }
 });
 

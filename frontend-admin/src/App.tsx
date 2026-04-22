@@ -77,10 +77,11 @@ function CallProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isAuthenticated, token])
 
-  // WebRTC Call Hook (ZELO-style)
+  // PeerJS Call Hook (Zalo-style)
   const {
     phase: callPhase,
     callType,
+    ringingDirection,
     incomingCall,
     localStream,
     remoteStream,
@@ -94,12 +95,15 @@ function CallProvider({ children }: { children: React.ReactNode }) {
     toggleVideo,
   } = useWebRTCCall(socket, callUser, {
     onPhaseChange: (newPhase) => {
-      if (newPhase === 'connected') {
+      if (newPhase === 'IN_CALL') {
+        if (durationRef.current) {
+          clearInterval(durationRef.current)
+        }
         setCallDuration(0)
         durationRef.current = setInterval(() => {
           setCallDuration((prev) => prev + 1)
         }, 1000)
-      } else if (newPhase === 'idle') {
+      } else {
         if (durationRef.current) {
           clearInterval(durationRef.current)
           durationRef.current = null
@@ -153,10 +157,11 @@ function CallProvider({ children }: { children: React.ReactNode }) {
   return (
     <>
       {/* Call overlay — always on top of everything */}
-      {callPhase !== 'idle' && (
+      {(callPhase === 'RINGING' || callPhase === 'IN_CALL') && (
         <VideoCallOverlay
           phase={callPhase}
           callType={callType}
+          ringingDirection={ringingDirection}
           peerName={peerName}
           peerAvatarUrl={peerAvatarUrl}
           durationSec={callDuration}

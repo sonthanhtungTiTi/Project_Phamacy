@@ -2,7 +2,7 @@
 // DEPRECATED - Socket.IO is now initialized directly in App.tsx
 // ==========================================
 // Tính năng gọi điện dùng Socket.IO trực tiếp trong App.tsx
-// và hook useWebRTCCall.ts (ZELO-style signaling).
+// và hook useWebRTCCall.ts để điều phối call flow cho PeerJS.
 //
 // File này được giữ lại để tránh lỗi import từ code cũ.
 // ==========================================

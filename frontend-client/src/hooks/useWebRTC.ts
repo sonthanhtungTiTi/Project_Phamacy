@@ -1,11 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import Peer, { type MediaConnection, type PeerJSOption } from 'peerjs'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-export type CallPhase = 'idle' | 'outgoing' | 'incoming' | 'connected'
+export type CallPhase = 'IDLE' | 'RINGING' | 'IN_CALL' | 'ENDED'
+export type RingingDirection = 'incoming' | 'outgoing' | null
 
 export interface IncomingCallData {
     callId: string
     callerId: string
+    callerPeerId: string
     callerName: string
     callerAvatarUrl?: string
     callType: 'video' | 'voice'
@@ -16,69 +19,105 @@ interface UseWebRTCOptions {
     onIncomingCall?: (data: IncomingCallData) => void
 }
 
-interface PendingOfferData {
+interface ActiveCallSession {
     callId: string
-    fromUserId: string
-    offer: RTCSessionDescriptionInit
+    targetUserId: string
+    targetPeerId: string
+    direction: 'incoming' | 'outgoing'
     callType: 'video' | 'voice'
 }
 
-const RTC_CONFIG: RTCConfiguration = {
+const SIGNALING_EVENTS = {
+    make: 'call:make',
+    incoming: 'call:incoming',
+    accept: 'call:accept',
+    accepted: 'call:accepted',
+    decline: 'call:decline',
+    declined: 'call:declined',
+    unavailable: 'call:unavailable',
+    busy: 'user-busy',
+    cancel: 'call:cancel',
+    cancelled: 'call:cancelled',
+    end: 'call:end',
+    timeout: 'call-timeout',
+} as const
+
+const OUTGOING_RING_TIMEOUT_MS = 30_000
+
+const RTC_ICE_CONFIG: RTCConfiguration = {
     iceServers: [
         { urls: ['stun:stun.l.google.com:19302'] },
         { urls: ['stun:stun1.l.google.com:19302'] },
     ],
 }
 
-const SIGNALING_EVENTS = {
-    initiate: 'call:initiate',
-    incoming: 'call:incoming',
-    offer: 'call:offer',
-    answer: 'call:answer',
-    iceCandidate: 'call:ice-candidate',
-    reject: 'call:reject',
-    cancel: 'call:cancel',
-    end: 'call:end',
-} as const
-
 const generateCallId = () => `call_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-
 const normalizeCallType = (callType: string | undefined): 'video' | 'voice' =>
     callType === 'voice' ? 'voice' : 'video'
+const normalizeUserId = (value: unknown): string => String(value || '')
 
-const getUserId = (user: any): string => String(user?.userId || user?._id || user?.id || '')
-
+const getUserId = (user: any): string => normalizeUserId(user?.userId || user?._id || user?.id)
 const getUserName = (user: any): string => user?.fullName || user?.name || 'Nguoi dung'
-
 const getUserAvatar = (user: any): string | undefined => user?.profilePic || user?.avatarUrl
 
+const getPeerOptions = (): PeerJSOption => {
+    const inferredHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+    const host = import.meta.env.VITE_PEER_HOST || inferredHost
+    const path = import.meta.env.VITE_PEER_PATH || '/myapp'
+    const portRaw = import.meta.env.VITE_PEER_PORT || '9000'
+    const secureRaw = import.meta.env.VITE_PEER_SECURE
+
+    const parsedPort = Number(portRaw)
+    const isLocalHost = host === 'localhost' || host === '127.0.0.1'
+    const inferredSecure = !isLocalHost && typeof window !== 'undefined' && window.location.protocol === 'https:'
+
+    const options: PeerJSOption = {
+        host,
+        path,
+        port: Number.isNaN(parsedPort) ? 9000 : parsedPort,
+        secure: secureRaw !== undefined ? secureRaw === 'true' : inferredSecure,
+        debug: 1,
+        config: RTC_ICE_CONFIG,
+    }
+
+    return options
+}
+
+const stopMediaStream = (stream: MediaStream | null) => {
+    if (!stream) return
+    stream.getTracks().forEach((track) => track.stop())
+}
+
+const getMediaCallId = (mediaCall: MediaConnection): string =>
+    normalizeUserId(mediaCall?.metadata?.callId)
+
 export const useWebRTC = (socket: any, user: any, options?: UseWebRTCOptions) => {
-    const [phase, setPhase] = useState<CallPhase>('idle')
+    const [phase, setPhase] = useState<CallPhase>('IDLE')
     const [incomingCall, setIncomingCall] = useState<IncomingCallData | null>(null)
     const [localStream, setLocalStream] = useState<MediaStream | null>(null)
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
     const [isMuted, setIsMuted] = useState(false)
     const [isVideoOn, setIsVideoOn] = useState(false)
     const [callType, setCallType] = useState<'video' | 'voice'>('video')
+    const [ringingDirection, setRingingDirection] = useState<RingingDirection>(null)
+    const [isPeerReady, setIsPeerReady] = useState(false)
 
-    const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
+    const peerRef = useRef<Peer | null>(null)
+    const peerReadyRef = useRef(false)
+    const activeMediaCallRef = useRef<MediaConnection | null>(null)
+    const pendingIncomingMediaCallRef = useRef<MediaConnection | null>(null)
     const localStreamRef = useRef<MediaStream | null>(null)
     const remoteStreamRef = useRef<MediaStream | null>(null)
-    const currentCallRef = useRef<{ callId: string; peerId: string } | null>(null)
-    const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([])
-    const pendingOfferRef = useRef<PendingOfferData | null>(null)
-    const phaseRef = useRef<CallPhase>('idle')
+    const currentCallRef = useRef<ActiveCallSession | null>(null)
+    const shouldAnswerCallIdRef = useRef<string | null>(null)
     const incomingCallRef = useRef<IncomingCallData | null>(null)
-    const callTypeRef = useRef<'video' | 'voice'>('video')
     const optionsRef = useRef<UseWebRTCOptions | undefined>(options)
+    const phaseRef = useRef<CallPhase>('IDLE')
+    const cleanupInProgressRef = useRef(false)
+    const endedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const outgoingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-    useEffect(() => {
-        optionsRef.current = options
-    }, [options])
-
-    useEffect(() => {
-        incomingCallRef.current = incomingCall
-    }, [incomingCall])
+    const userId = useMemo(() => getUserId(user), [user])
 
     const setCallPhase = useCallback((nextPhase: CallPhase) => {
         phaseRef.current = nextPhase
@@ -86,27 +125,118 @@ export const useWebRTC = (socket: any, user: any, options?: UseWebRTCOptions) =>
         optionsRef.current?.onPhaseChange?.(nextPhase)
     }, [])
 
-    const closePeerConnection = useCallback(() => {
-        if (peerConnectionRef.current) {
-            peerConnectionRef.current.close()
-            peerConnectionRef.current = null
+    const clearEndedTimer = useCallback(() => {
+        if (!endedTimerRef.current) return
+        clearTimeout(endedTimerRef.current)
+        endedTimerRef.current = null
+    }, [])
+
+    const clearOutgoingTimeout = useCallback(() => {
+        if (!outgoingTimeoutRef.current) return
+        clearTimeout(outgoingTimeoutRef.current)
+        outgoingTimeoutRef.current = null
+    }, [])
+
+    const markEndedThenIdle = useCallback(() => {
+        clearEndedTimer()
+        setCallPhase('ENDED')
+
+        endedTimerRef.current = setTimeout(() => {
+            if (phaseRef.current === 'ENDED') {
+                setCallPhase('IDLE')
+            }
+        }, 400)
+    }, [clearEndedTimer, setCallPhase])
+
+    const closeMediaConnections = useCallback(() => {
+        const activeMediaCall = activeMediaCallRef.current
+        activeMediaCallRef.current = null
+        if (activeMediaCall) {
+            try {
+                activeMediaCall.close()
+            } catch {
+                return
+            }
         }
 
-        if (localStreamRef.current) {
-            localStreamRef.current.getTracks().forEach((track) => track.stop())
-            localStreamRef.current = null
+        const pendingMediaCall = pendingIncomingMediaCallRef.current
+        pendingIncomingMediaCallRef.current = null
+        if (pendingMediaCall && pendingMediaCall !== activeMediaCall) {
+            try {
+                pendingMediaCall.close()
+            } catch {
+                return
+            }
         }
+    }, [])
 
+    const cleanupStreams = useCallback(() => {
+        stopMediaStream(localStreamRef.current)
+        localStreamRef.current = null
+
+        stopMediaStream(remoteStreamRef.current)
         remoteStreamRef.current = null
-        currentCallRef.current = null
-        pendingCandidatesRef.current = []
-        pendingOfferRef.current = null
 
         setLocalStream(null)
         setRemoteStream(null)
         setIsMuted(false)
         setIsVideoOn(false)
     }, [])
+
+    const resetCallRefs = useCallback(() => {
+        setIncomingCall(null)
+        incomingCallRef.current = null
+        currentCallRef.current = null
+        shouldAnswerCallIdRef.current = null
+        setRingingDirection(null)
+    }, [])
+
+    const resetCallState = useCallback(
+        (nextPhase: 'IDLE' | 'ENDED' = 'ENDED') => {
+            cleanupInProgressRef.current = true
+            clearOutgoingTimeout()
+
+            closeMediaConnections()
+            cleanupStreams()
+            resetCallRefs()
+
+            if (nextPhase === 'ENDED') {
+                markEndedThenIdle()
+            } else {
+                clearEndedTimer()
+                setCallPhase('IDLE')
+            }
+
+            setTimeout(() => {
+                cleanupInProgressRef.current = false
+            }, 0)
+        },
+        [cleanupStreams, closeMediaConnections, markEndedThenIdle, clearEndedTimer, clearOutgoingTimeout, resetCallRefs, setCallPhase]
+    )
+
+    const startOutgoingTimeout = useCallback(
+        (callId: string, targetUserId: string) => {
+            clearOutgoingTimeout()
+
+            outgoingTimeoutRef.current = setTimeout(() => {
+                const currentCall = currentCallRef.current
+
+                if (!currentCall) return
+                if (currentCall.callId !== callId) return
+                if (currentCall.direction !== 'outgoing') return
+                if (phaseRef.current !== 'RINGING') return
+
+                socket?.emit(SIGNALING_EVENTS.timeout, {
+                    callId,
+                    targetUserId,
+                    reason: 'NO_ANSWER',
+                })
+
+                resetCallState('ENDED')
+            }, OUTGOING_RING_TIMEOUT_MS)
+        },
+        [clearOutgoingTimeout, resetCallState, socket]
+    )
 
     const initializeUserMedia = useCallback(async (enableVideo: boolean) => {
         if (localStreamRef.current) {
@@ -133,6 +263,10 @@ export const useWebRTC = (socket: any, user: any, options?: UseWebRTCOptions) =>
             setIsVideoOn(enableVideo && stream.getVideoTracks().length > 0)
             return stream
         } catch {
+            if (!enableVideo) {
+                throw new Error('Khong the truy cap microphone')
+            }
+
             const audioOnlyStream = await navigator.mediaDevices.getUserMedia({
                 audio: true,
                 video: false,
@@ -145,376 +279,466 @@ export const useWebRTC = (socket: any, user: any, options?: UseWebRTCOptions) =>
         }
     }, [])
 
-    const createPeerConnection = useCallback(async () => {
-        if (peerConnectionRef.current) {
-            return peerConnectionRef.current
-        }
+    const attachMediaCall = useCallback(
+        (mediaCall: MediaConnection, callId: string) => {
+            activeMediaCallRef.current = mediaCall
+            pendingIncomingMediaCallRef.current = null
 
-        const peerConnection = new RTCPeerConnection(RTC_CONFIG)
+            mediaCall.on('stream', (stream) => {
+                remoteStreamRef.current = stream
+                setRemoteStream(stream)
+                setRingingDirection(null)
+                setCallPhase('IN_CALL')
+            })
 
-        if (!localStreamRef.current) {
-            await initializeUserMedia(callTypeRef.current === 'video')
-        }
+            mediaCall.on('close', () => {
+                if (cleanupInProgressRef.current) return
+                if (currentCallRef.current?.callId && currentCallRef.current.callId !== callId) return
+                resetCallState('ENDED')
+            })
 
-        if (localStreamRef.current) {
-            localStreamRef.current.getTracks().forEach((track) => {
-                if (localStreamRef.current) {
-                    peerConnection.addTrack(track, localStreamRef.current)
+            mediaCall.on('error', () => {
+                if (cleanupInProgressRef.current) return
+                resetCallState('ENDED')
+            })
+        },
+        [resetCallState, setCallPhase]
+    )
+
+    const answerIncomingPeerCall = useCallback(
+        async (mediaCall: MediaConnection) => {
+            const callId = getMediaCallId(mediaCall)
+            if (!callId || !currentCallRef.current || currentCallRef.current.callId !== callId) return
+
+            const stream = await initializeUserMedia(currentCallRef.current.callType === 'video')
+            attachMediaCall(mediaCall, callId)
+            mediaCall.answer(stream)
+            shouldAnswerCallIdRef.current = null
+            setIncomingCall(null)
+            incomingCallRef.current = null
+        },
+        [attachMediaCall, initializeUserMedia]
+    )
+
+    const handlePeerIncomingCall = useCallback(
+        async (mediaCall: MediaConnection) => {
+            const callId = getMediaCallId(mediaCall)
+            const expectedCallId = currentCallRef.current?.callId || incomingCallRef.current?.callId
+
+            if (!callId || !expectedCallId || callId !== expectedCallId) {
+                try {
+                    mediaCall.close()
+                } catch {
+                    return
                 }
-            })
-        }
-
-        peerConnection.ontrack = (event) => {
-            if (event.streams && event.streams[0]) {
-                remoteStreamRef.current = event.streams[0]
-                setRemoteStream(event.streams[0])
-            }
-        }
-
-        peerConnection.onicecandidate = (event) => {
-            if (!event.candidate || !socket || !currentCallRef.current) return
-
-            socket.emit(SIGNALING_EVENTS.iceCandidate, {
-                callId: currentCallRef.current.callId,
-                targetUserId: currentCallRef.current.peerId,
-                candidate: event.candidate,
-            })
-        }
-
-        peerConnection.onconnectionstatechange = () => {
-            if (peerConnection.connectionState === 'connected') {
-                setCallPhase('connected')
-            }
-
-            if (peerConnection.connectionState === 'failed') {
-                closePeerConnection()
-                setCallPhase('idle')
-            }
-        }
-
-        peerConnectionRef.current = peerConnection
-        return peerConnection
-    }, [closePeerConnection, initializeUserMedia, setCallPhase, socket])
-
-    const initiateCall = useCallback(
-        async (peerId: string, _peerName: string, type: 'video' | 'voice' = 'video') => {
-            if (!socket || !peerId) {
                 return
             }
 
+            pendingIncomingMediaCallRef.current = mediaCall
+
+            if (shouldAnswerCallIdRef.current === callId) {
+                try {
+                    await answerIncomingPeerCall(mediaCall)
+                } catch {
+                    resetCallState('ENDED')
+                }
+            }
+        },
+        [answerIncomingPeerCall, resetCallState]
+    )
+
+    const isCurrentCall = useCallback((callId?: string) => {
+        const activeCallId = currentCallRef.current?.callId || incomingCallRef.current?.callId
+        if (!activeCallId) return false
+        if (!callId) return true
+        return activeCallId === normalizeUserId(callId)
+    }, [])
+
+    const initiateCall = useCallback(
+        async (peerId: string, _peerName: string, type: 'video' | 'voice' = 'video') => {
+            const targetUserId = normalizeUserId(peerId)
+            if (!socket || !targetUserId || !userId) {
+                return
+            }
+
+            if (!peerRef.current || !peerReadyRef.current) {
+                throw new Error('Peer connection chua san sang')
+            }
+
             try {
-                callTypeRef.current = type
-                setCallType(type)
+                const normalizedType = normalizeCallType(type)
+                await initializeUserMedia(normalizedType === 'video')
+
+                setCallType(normalizedType)
+                setRingingDirection('outgoing')
 
                 const callId = generateCallId()
-                currentCallRef.current = { callId, peerId }
-
-                setCallPhase('outgoing')
-
-                const peerConnection = await createPeerConnection()
-                const offer = await peerConnection.createOffer({
-                    offerToReceiveAudio: true,
-                    offerToReceiveVideo: type === 'video',
-                })
-
-                await peerConnection.setLocalDescription(offer)
-
-                socket.emit(SIGNALING_EVENTS.initiate, {
+                currentCallRef.current = {
                     callId,
-                    targetUserId: peerId,
-                    callType: type,
-                    callerData: {
-                        userId: getUserId(user),
-                        name: getUserName(user),
-                        avatar: getUserAvatar(user),
-                    },
+                    targetUserId,
+                    targetPeerId: targetUserId,
+                    direction: 'outgoing',
+                    callType: normalizedType,
+                }
+
+                setCallPhase('RINGING')
+
+                const ack = await new Promise<{ ok?: boolean }>((resolve) => {
+                    let settled = false
+                    const timeout = setTimeout(() => {
+                        if (!settled) {
+                            settled = true
+                            resolve({ ok: false })
+                        }
+                    }, 6000)
+
+                    socket.emit(
+                        SIGNALING_EVENTS.make,
+                        {
+                            callId,
+                            targetUserId,
+                            callType: normalizedType,
+                            callerPeerId: userId,
+                            callerData: {
+                                userId,
+                                name: getUserName(user),
+                                avatar: getUserAvatar(user),
+                            },
+                        },
+                        (response: { ok?: boolean }) => {
+                            if (settled) return
+                            settled = true
+                            clearTimeout(timeout)
+                            resolve(response || { ok: false })
+                        }
+                    )
                 })
 
-                socket.emit(SIGNALING_EVENTS.offer, {
-                    callId,
-                    targetUserId: peerId,
-                    offer,
-                })
+                if (!ack?.ok) {
+                    resetCallState('ENDED')
+                    return
+                }
+
+                startOutgoingTimeout(callId, targetUserId)
             } catch (error) {
-                closePeerConnection()
-                setCallPhase('idle')
+                resetCallState('ENDED')
                 throw error
             }
         },
-        [closePeerConnection, createPeerConnection, setCallPhase, socket, user]
+        [initializeUserMedia, resetCallState, setCallPhase, socket, startOutgoingTimeout, user, userId]
     )
 
     const answerCall = useCallback(async () => {
         const callToAnswer = incomingCallRef.current
-        const offerData = pendingOfferRef.current
+        const activeCall = currentCallRef.current
 
-        if (!callToAnswer || !offerData || !socket) return
+        if (!callToAnswer || !activeCall || !socket || !userId) return
 
         try {
-            currentCallRef.current = {
-                callId: offerData.callId,
-                peerId: callToAnswer.callerId,
-            }
-
-            callTypeRef.current = callToAnswer.callType
             setCallType(callToAnswer.callType)
+            setRingingDirection('incoming')
 
-            const peerConnection = await createPeerConnection()
+            await initializeUserMedia(callToAnswer.callType === 'video')
 
-            await peerConnection.setRemoteDescription(
-                new RTCSessionDescription(offerData.offer)
-            )
-
-            const answer = await peerConnection.createAnswer()
-            await peerConnection.setLocalDescription(answer)
-
-            socket.emit(SIGNALING_EVENTS.answer, {
-                callId: offerData.callId,
-                targetUserId: callToAnswer.callerId,
-                answer,
-            })
-
-            pendingCandidatesRef.current.forEach((candidate) => {
-                peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {
-                    return
-                })
-            })
-            pendingCandidatesRef.current = []
-
+            shouldAnswerCallIdRef.current = callToAnswer.callId
             setIncomingCall(null)
             incomingCallRef.current = null
-            pendingOfferRef.current = null
-            setCallPhase('connected')
+
+            socket.emit(SIGNALING_EVENTS.accept, {
+                callId: callToAnswer.callId,
+                targetUserId: activeCall.targetUserId,
+                calleePeerId: userId,
+                calleeData: {
+                    userId,
+                    name: getUserName(user),
+                    avatar: getUserAvatar(user),
+                },
+            })
+
+            const pendingIncomingCall = pendingIncomingMediaCallRef.current
+            if (pendingIncomingCall && getMediaCallId(pendingIncomingCall) === callToAnswer.callId) {
+                await answerIncomingPeerCall(pendingIncomingCall)
+            }
         } catch {
-            closePeerConnection()
-            setCallPhase('idle')
+            socket.emit(SIGNALING_EVENTS.decline, {
+                callId: callToAnswer.callId,
+                targetUserId: callToAnswer.callerId,
+            })
+            resetCallState('ENDED')
         }
-    }, [closePeerConnection, createPeerConnection, setCallPhase, socket])
+    }, [answerIncomingPeerCall, initializeUserMedia, resetCallState, socket, user, userId])
 
     const handleIncoming = useCallback(
         (data: any) => {
-            const callerId = String(data?.callerId || data?.fromUserId || '')
-            if (!callerId) return
+            const callerId = normalizeUserId(data?.callerId)
+            const callId = normalizeUserId(data?.callId)
+            if (!callerId || !callId) return
 
-            const ct = normalizeCallType(data?.callType)
-            const incomingData: IncomingCallData = {
-                callId: data?.callId || generateCallId(),
-                callerId,
-                callerName: data?.callerData?.name || data?.callerName || 'Nguoi dung',
-                callerAvatarUrl: data?.callerData?.avatar || data?.callerAvatarUrl,
-                callType: ct,
-            }
-
-            const currentCallId = currentCallRef.current?.callId || incomingCallRef.current?.callId
-            const isSameCall = currentCallId ? incomingData.callId === currentCallId : false
-
-            if (phaseRef.current !== 'idle' && !isSameCall) {
-                socket?.emit(SIGNALING_EVENTS.reject, {
-                    callId: incomingData.callId,
+            if (phaseRef.current !== 'IDLE') {
+                socket?.emit(SIGNALING_EVENTS.decline, {
+                    callId,
                     targetUserId: callerId,
                 })
                 return
             }
 
-            callTypeRef.current = ct
-            setCallType(ct)
+            const callerPeerId = normalizeUserId(data?.callerPeerId || callerId)
+            const normalizedType = normalizeCallType(data?.callType)
+            const incomingData: IncomingCallData = {
+                callId,
+                callerId,
+                callerPeerId,
+                callerName: data?.callerData?.name || data?.callerName || 'Nguoi dung',
+                callerAvatarUrl: data?.callerData?.avatar || data?.callerAvatarUrl,
+                callType: normalizedType,
+            }
+
+            currentCallRef.current = {
+                callId,
+                targetUserId: callerId,
+                targetPeerId: callerPeerId,
+                direction: 'incoming',
+                callType: normalizedType,
+            }
+
+            setCallType(normalizedType)
             setIncomingCall(incomingData)
             incomingCallRef.current = incomingData
-            setCallPhase('incoming')
+            setRingingDirection('incoming')
+            setCallPhase('RINGING')
             optionsRef.current?.onIncomingCall?.(incomingData)
         },
         [setCallPhase, socket]
     )
 
-    const handleOffer = useCallback(
-        (data: any) => {
-            const callerId = String(data?.callerId || data?.fromUserId || '')
-            const normalizedOffer = data?.offer || data?.sdp
+    const handleAccepted = useCallback(
+        async (data: any) => {
+            const activeCall = currentCallRef.current
+            if (!activeCall || activeCall.direction !== 'outgoing') return
+            if (!isCurrentCall(data?.callId)) return
 
-            if (!callerId || !normalizedOffer) return
+            clearOutgoingTimeout()
 
-            const callId = data?.callId || incomingCallRef.current?.callId || generateCallId()
-            const ct = normalizeCallType(data?.callType || incomingCallRef.current?.callType)
-
-            const currentCallId = currentCallRef.current?.callId || incomingCallRef.current?.callId
-            const isSameCall = currentCallId ? callId === currentCallId : false
-
-            if (phaseRef.current !== 'idle' && !isSameCall) {
-                socket?.emit(SIGNALING_EVENTS.reject, {
-                    callId,
-                    targetUserId: callerId,
-                })
+            const peer = peerRef.current
+            if (!peer || !peerReadyRef.current) {
+                resetCallState('ENDED')
                 return
             }
 
-            pendingOfferRef.current = {
-                callId,
-                fromUserId: callerId,
-                offer: normalizedOffer,
-                callType: ct,
-            }
+            try {
+                const calleePeerId = normalizeUserId(data?.calleePeerId || activeCall.targetPeerId || activeCall.targetUserId)
+                activeCall.targetPeerId = calleePeerId
 
-            if (!incomingCallRef.current) {
-                const incomingData: IncomingCallData = {
-                    callId,
-                    callerId,
-                    callerName: data?.callerData?.name || data?.callerName || 'Nguoi dung',
-                    callerAvatarUrl: data?.callerData?.avatar || data?.callerAvatarUrl,
-                    callType: ct,
+                const stream = await initializeUserMedia(activeCall.callType === 'video')
+                const mediaCall = peer.call(calleePeerId, stream, {
+                    metadata: {
+                        callId: activeCall.callId,
+                        callType: activeCall.callType,
+                        callerId: userId,
+                    },
+                })
+
+                if (!mediaCall) {
+                    resetCallState('ENDED')
+                    return
                 }
 
-                setIncomingCall(incomingData)
-                incomingCallRef.current = incomingData
-                setCallPhase('incoming')
-                optionsRef.current?.onIncomingCall?.(incomingData)
+                attachMediaCall(mediaCall, activeCall.callId)
+            } catch {
+                resetCallState('ENDED')
             }
         },
-        [setCallPhase, socket]
+        [attachMediaCall, clearOutgoingTimeout, initializeUserMedia, isCurrentCall, resetCallState, userId]
     )
 
-    const handleAnswer = useCallback(
-        async (data: any) => {
-            if (!currentCallRef.current) return
-            if (data?.callId && data.callId !== currentCallRef.current.callId) return
-
-            const normalizedAnswer = data?.answer || data?.sdp
-            if (!normalizedAnswer) return
-
-            const peerConnection = peerConnectionRef.current
-            if (!peerConnection) return
-
-            const responderId = String(data?.calleeId || data?.fromUserId || '')
-            if (responderId && currentCallRef.current.peerId !== responderId) {
-                currentCallRef.current.peerId = responderId
-            }
-
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(normalizedAnswer))
-
-            pendingCandidatesRef.current.forEach((candidate) => {
-                peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {
-                    return
-                })
-            })
-            pendingCandidatesRef.current = []
-
-            setCallPhase('connected')
+    const handleRemoteEnd = useCallback(
+        (data: any) => {
+            if (!isCurrentCall(data?.callId)) return
+            resetCallState('ENDED')
         },
-        [setCallPhase]
+        [isCurrentCall, resetCallState]
     )
-
-    const handleIceCandidate = useCallback(async (data: any) => {
-        if (!data?.candidate) return
-
-        const expectedCallId =
-            currentCallRef.current?.callId || incomingCallRef.current?.callId || pendingOfferRef.current?.callId
-        if (expectedCallId && data?.callId && data.callId !== expectedCallId) return
-
-        const peerConnection = peerConnectionRef.current
-        if (!peerConnection || !peerConnection.remoteDescription) {
-            pendingCandidatesRef.current.push(data.candidate)
-            return
-        }
-
-        try {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate))
-        } catch {
-            return
-        }
-    }, [])
-
-    const clearCallState = useCallback(() => {
-        setIncomingCall(null)
-        incomingCallRef.current = null
-        closePeerConnection()
-        setCallPhase('idle')
-    }, [closePeerConnection, setCallPhase])
-
-    const endCall = useCallback(() => {
-        if (socket && currentCallRef.current) {
-            socket.emit(SIGNALING_EVENTS.end, {
-                callId: currentCallRef.current.callId,
-                targetUserId: currentCallRef.current.peerId,
-            })
-        }
-
-        clearCallState()
-    }, [clearCallState, socket])
 
     const rejectCall = useCallback(() => {
-        if (socket && incomingCallRef.current) {
-            socket.emit(SIGNALING_EVENTS.reject, {
-                callId: incomingCallRef.current.callId,
-                targetUserId: incomingCallRef.current.callerId,
+        const currentIncomingCall = incomingCallRef.current
+        if (socket && currentIncomingCall) {
+            socket.emit(SIGNALING_EVENTS.decline, {
+                callId: currentIncomingCall.callId,
+                targetUserId: currentIncomingCall.callerId,
             })
         }
 
-        clearCallState()
-    }, [clearCallState, socket])
+        resetCallState('ENDED')
+    }, [resetCallState, socket])
+
+    const endCall = useCallback(() => {
+        const activeCall = currentCallRef.current
+        if (socket && activeCall) {
+            const eventName =
+                phaseRef.current === 'RINGING' && activeCall.direction === 'outgoing'
+                    ? SIGNALING_EVENTS.cancel
+                    : SIGNALING_EVENTS.end
+
+            socket.emit(eventName, {
+                callId: activeCall.callId,
+                targetUserId: activeCall.targetUserId,
+            })
+        }
+
+        resetCallState('ENDED')
+    }, [resetCallState, socket])
 
     const toggleAudio = useCallback(() => {
         if (!localStreamRef.current) return
 
+        const nextMuted = !isMuted
         localStreamRef.current.getAudioTracks().forEach((track) => {
-            track.enabled = !track.enabled
+            track.enabled = !nextMuted
         })
 
-        setIsMuted((prev) => !prev)
-    }, [])
+        setIsMuted(nextMuted)
+    }, [isMuted])
 
     const toggleVideo = useCallback(() => {
         if (!localStreamRef.current) return
 
-        const tracks = localStreamRef.current.getVideoTracks()
-        if (!tracks.length) return
+        const videoTracks = localStreamRef.current.getVideoTracks()
+        if (!videoTracks.length) return
 
         const nextValue = !isVideoOn
-        tracks.forEach((track) => {
+        videoTracks.forEach((track) => {
             track.enabled = nextValue
         })
+
         setIsVideoOn(nextValue)
     }, [isVideoOn])
 
     useEffect(() => {
-        if (!socket) return
+        optionsRef.current = options
+    }, [options])
 
-        const handleRemoteEnd = (data: any) => {
-            const expectedCallId =
-                currentCallRef.current?.callId || incomingCallRef.current?.callId || pendingOfferRef.current?.callId
-
-            if (expectedCallId && data?.callId && data.callId !== expectedCallId) return
-            clearCallState()
+    useEffect(() => {
+        if (!userId) {
+            if (peerRef.current) {
+                try {
+                    peerRef.current.destroy()
+                } catch {
+                    return
+                }
+                peerRef.current = null
+            }
+            peerReadyRef.current = false
+            setIsPeerReady(false)
+            return
         }
 
+        const peer = new Peer(userId, getPeerOptions())
+        peerRef.current = peer
+        peerReadyRef.current = false
+        setIsPeerReady(false)
+
+        peer.on('open', () => {
+            peerReadyRef.current = true
+            setIsPeerReady(true)
+        })
+
+        peer.on('call', (mediaCall) => {
+            void handlePeerIncomingCall(mediaCall)
+        })
+
+        peer.on('error', () => {
+            peerReadyRef.current = false
+            setIsPeerReady(false)
+            if (phaseRef.current !== 'IDLE') {
+                resetCallState('ENDED')
+            }
+        })
+
+        peer.on('disconnected', () => {
+            peerReadyRef.current = false
+            setIsPeerReady(false)
+        })
+
+        peer.on('close', () => {
+            peerReadyRef.current = false
+            setIsPeerReady(false)
+        })
+
+        return () => {
+            peerReadyRef.current = false
+            setIsPeerReady(false)
+
+            if (peerRef.current === peer) {
+                peerRef.current = null
+            }
+
+            try {
+                peer.destroy()
+            } catch {
+                return
+            }
+        }
+    }, [handlePeerIncomingCall, resetCallState, userId])
+
+    useEffect(() => {
+        if (!socket) return
+
         socket.on(SIGNALING_EVENTS.incoming, handleIncoming)
-        socket.on(SIGNALING_EVENTS.offer, handleOffer)
-        socket.on(SIGNALING_EVENTS.answer, handleAnswer)
-        socket.on(SIGNALING_EVENTS.iceCandidate, handleIceCandidate)
+        socket.on(SIGNALING_EVENTS.accepted, handleAccepted)
+        socket.on(SIGNALING_EVENTS.declined, handleRemoteEnd)
+        socket.on(SIGNALING_EVENTS.unavailable, handleRemoteEnd)
+        socket.on(SIGNALING_EVENTS.busy, handleRemoteEnd)
+        socket.on(SIGNALING_EVENTS.cancelled, handleRemoteEnd)
         socket.on(SIGNALING_EVENTS.end, handleRemoteEnd)
-        socket.on(SIGNALING_EVENTS.cancel, handleRemoteEnd)
-        socket.on(SIGNALING_EVENTS.reject, handleRemoteEnd)
+        socket.on(SIGNALING_EVENTS.timeout, handleRemoteEnd)
+
+        const handleSocketDisconnect = () => {
+            if (phaseRef.current !== 'IDLE') {
+                resetCallState('ENDED')
+            }
+        }
+
+        socket.on('disconnect', handleSocketDisconnect)
 
         return () => {
             socket.off(SIGNALING_EVENTS.incoming, handleIncoming)
-            socket.off(SIGNALING_EVENTS.offer, handleOffer)
-            socket.off(SIGNALING_EVENTS.answer, handleAnswer)
-            socket.off(SIGNALING_EVENTS.iceCandidate, handleIceCandidate)
+            socket.off(SIGNALING_EVENTS.accepted, handleAccepted)
+            socket.off(SIGNALING_EVENTS.declined, handleRemoteEnd)
+            socket.off(SIGNALING_EVENTS.unavailable, handleRemoteEnd)
+            socket.off(SIGNALING_EVENTS.busy, handleRemoteEnd)
+            socket.off(SIGNALING_EVENTS.cancelled, handleRemoteEnd)
             socket.off(SIGNALING_EVENTS.end, handleRemoteEnd)
-            socket.off(SIGNALING_EVENTS.cancel, handleRemoteEnd)
-            socket.off(SIGNALING_EVENTS.reject, handleRemoteEnd)
+            socket.off(SIGNALING_EVENTS.timeout, handleRemoteEnd)
+            socket.off('disconnect', handleSocketDisconnect)
         }
-    }, [clearCallState, handleAnswer, handleIceCandidate, handleIncoming, handleOffer, socket])
+    }, [handleAccepted, handleIncoming, handleRemoteEnd, resetCallState, socket])
+
+    useEffect(() => {
+        incomingCallRef.current = incomingCall
+    }, [incomingCall])
 
     useEffect(() => {
         return () => {
-            if (phaseRef.current !== 'idle') {
-                closePeerConnection()
+            clearEndedTimer()
+            clearOutgoingTimeout()
+            resetCallState('IDLE')
+
+            if (peerRef.current) {
+                try {
+                    peerRef.current.destroy()
+                } catch {
+                    return
+                }
+                peerRef.current = null
             }
         }
-    }, [closePeerConnection])
+    }, [clearEndedTimer, clearOutgoingTimeout, resetCallState])
 
     return {
         phase,
         callType,
+        ringingDirection,
+        isPeerReady,
         incomingCall,
         localStream,
         remoteStream,

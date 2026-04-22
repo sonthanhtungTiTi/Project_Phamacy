@@ -202,7 +202,7 @@ const updateProduct = async (productId, data) => {
 
 	const product = await Product.findByIdAndUpdate(
 		productId,
-		{ $set: data },
+		data,
 		{ new: true, runValidators: true },
 	)
 

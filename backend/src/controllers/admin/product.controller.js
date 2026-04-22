@@ -54,8 +54,9 @@ const createProduct = async (req, res) => {
 
 const updateProduct = async (req, res) => {
 	try {
-		const { productId } = req.params
-		const data = await productService.updateProduct(productId, req.body)
+		const { productId, id } = req.params
+		const targetId = productId || id
+		const data = await productService.updateProduct(targetId, req.body)
 
 		return res.status(200).json({
 			success: true,

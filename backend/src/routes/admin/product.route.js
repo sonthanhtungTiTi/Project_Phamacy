@@ -23,6 +23,9 @@ router.post('/', validate(createProductSchema), productController.createProduct)
 // PATCH /api/admin/products/:productId — Cập nhật sản phẩm
 router.patch('/:productId', validate(updateProductSchema), productController.updateProduct)
 
+// PUT /api/admin/products/:id — Cập nhật sản phẩm (compat cho luồng form mới)
+router.put('/:id', validate(updateProductSchema), productController.updateProduct)
+
 // DELETE /api/admin/products/:productId — Xóa sản phẩm (soft delete)
 router.delete('/:productId', productController.deleteProduct)
 

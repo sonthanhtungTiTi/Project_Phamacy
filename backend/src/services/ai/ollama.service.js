@@ -228,6 +228,72 @@ const generateReplyFromData = async ({ userMessage, intent, action, dataSummary,
 	return callOllama({ prompt, system: systemPrompt, temperature: 0.35 })
 }
 
+/**
+ * Phase 2: Format product data + generate formatted reply with product details & images
+ * @param {string} userMessage - Customer's question
+ * @param {Array} products - Product list from DB
+ * @param {string} contextNote - Additional context
+ * @returns {Promise<string>} Formatted reply with product info and markdown image links
+ */
+const generatePhase2Reply = async ({ userMessage, products = [], contextNote = '' }) => {
+	if (!Array.isArray(products) || products.length === 0) {
+		return ''
+	}
+
+	const systemPrompt = `Bạn là trợ lý bán hàng chuyên nghiệp nhà thuốc. Nhiệm vụ của bạn là tổng hợp dữ liệu sản phẩm được cung cấp để trả lời khách hàng.
+
+QUY TẮC:
+1. CHỈ sử dụng thông tin trong phần 'DỮ LIỆU CÓ SẴN'. Không tự chế thông tin.
+2. Nếu có sản phẩm, liệt kê Tên, Giá và dùng cú pháp Markdown để hiển thị ảnh: ![tên](link_ảnh).
+3. Trả lời bằng tiếng Việt, thân thiện, tự nhiên.
+4. Trả về CHỈ định dạng JSON theo format: {"final_answer": "..."}`
+
+	const productsString = products
+		.slice(0, 5)
+		.map((p, i) => {
+			const name = p.productName || p.name || 'Sản phẩm'
+			const price = p.price ? `${Number(p.price).toLocaleString('vi-VN')}đ` : 'Liên hệ'
+			const imageUrl = p.imageUrl || p.image_url || p.productImage || ''
+			const description = p.description || p.desc || ''
+			const stock = Number(p.totalStock || 0)
+			const stockText = stock > 0 ? `Còn: ${stock}` : 'Tạm hết hàng'
+
+			let line = `${i + 1}. Tên: ${name}, Giá: ${price}, ${stockText}`
+			if (description) {
+				line += `, Mô tả: ${description}`
+			}
+			if (imageUrl) {
+				line += `, Link ảnh: ${imageUrl}`
+			}
+			return line
+		})
+		.join('\n')
+
+	const prompt = `CÂU HỎI CỦA KHÁCH: "${String(userMessage || '').trim()}"
+
+DỮ LIỆU CÓ SẴN TỪ KHO:
+${productsString}
+
+Hãy soạn câu trả lời đầy đủ thông tin và hình ảnh cho khách. Sử dụng Markdown ![tên sản phẩm](link_ảnh) để hiển thị hình ảnh.
+
+Trả về JSON: {"final_answer": "..."}`
+
+	try {
+		const raw = await callOllama({
+			prompt,
+			system: systemPrompt,
+			temperature: 0.5,
+			format: 'json',
+		})
+
+		const parsed = parseOllamaJson(raw, {})
+		return String(parsed.final_answer || '').trim() || ''
+	} catch (error) {
+		console.error('Phase 2 generation error:', error.message)
+		return ''
+	}
+}
+
 module.exports = {
 	ACTIONS,
 	INTENTS,
@@ -235,4 +301,5 @@ module.exports = {
 	parseOllamaJson,
 	classifyIntent,
 	generateReplyFromData,
+	generatePhase2Reply,
 }

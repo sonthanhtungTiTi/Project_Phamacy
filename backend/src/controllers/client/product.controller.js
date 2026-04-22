@@ -20,6 +20,26 @@ const listProducts = async (req, res) => {
 	}
 }
 
+const searchProducts = async (req, res) => {
+	try {
+		const data = await productService.searchProductsByKeyword(req.query)
+
+		return res.status(200).json({
+			success: true,
+			message: 'Product search completed',
+			data,
+		})
+	} catch (error) {
+		const statusCode = error.statusCode || 500
+
+		return res.status(statusCode).json({
+			success: false,
+			message: error.message || 'Search products failed',
+			error: error.message,
+		})
+	}
+}
+
 const getProductDetail = async (req, res) => {
 	try {
 		const { productId } = req.params
@@ -43,5 +63,6 @@ const getProductDetail = async (req, res) => {
 
 module.exports = {
 	listProducts,
+	searchProducts,
 	getProductDetail,
 }

@@ -9,7 +9,7 @@ import CartPage from './pages/CartPage'
 import CheckoutPage from './pages/CheckoutPage'
 import MomoResultPage from './pages/MomoResultPage'
 import ProfilePage from './pages/ProfilePage.tsx'
-import VideoCallOverlay from './components/calls/VideoCallComponent'
+import VideoCallOverlay from './components/calls/VideoCallComponent.tsx'
 import CallTargetSelector from './components/calls/CallTargetSelector'
 import FloatingContactButton from './components/ui/FloatingContactButton'
 import ClientChatWidget from './components/chat/ClientChatWidget'
@@ -21,7 +21,9 @@ const SOCKET_URL = (() => {
   if (explicitSocketUrl) return explicitSocketUrl
 
   const apiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3000').replace(/\/$/, '')
-  return apiUrl.endsWith('/api') ? apiUrl.slice(0, -4) : apiUrl
+  const url = apiUrl.endsWith('/api') ? apiUrl.slice(0, -4) : apiUrl
+  console.log('🔌 Socket URL:', url)
+  return url
 })()
 
 const getProductIdFromPath = () => {
@@ -77,8 +79,12 @@ function App() {
   // Initialize Socket.IO
   useEffect(() => {
     const token = localStorage.getItem('clientAccessToken')
-    if (!token) return
+    if (!token) {
+      console.log('⚠️  No token found - skipping socket connection')
+      return
+    }
 
+    console.log('🔌 Attempting to connect socket to:', SOCKET_URL)
     const userInfo = getUserInfo()
     setUser(userInfo)
 
@@ -99,6 +105,14 @@ function App() {
       console.log('❌ Socket disconnected:', reason)
     })
 
+    newSocket.on('connect_error', (error) => {
+      console.error('❌ Socket connection error:', error)
+    })
+
+    newSocket.on('error', (error) => {
+      console.error('❌ Socket error:', error)
+    })
+
     socketRef.current = newSocket
     setSocket(newSocket)
 
@@ -108,7 +122,7 @@ function App() {
     }
   }, [getUserInfo])
 
-  // ==================== WEBRTC CALL HOOK ====================
+  // ==================== PEERJS CALL HOOK ====================
   const [callDuration, setCallDuration] = useState(0)
   const [callPeerName, setCallPeerName] = useState('Người dùng')
   const [callPeerAvatar, setCallPeerAvatar] = useState<string | undefined>(undefined)
@@ -117,6 +131,7 @@ function App() {
   const {
     phase: callPhase,
     callType,
+    ringingDirection,
     incomingCall,
     localStream,
     remoteStream,
@@ -130,19 +145,25 @@ function App() {
     toggleVideo,
   } = useWebRTCCall(socket, user, {
     onPhaseChange: (newPhase) => {
-      if (newPhase === 'connected') {
+      if (newPhase === 'IN_CALL') {
+        if (durationRef.current) {
+          clearInterval(durationRef.current)
+        }
         setCallDuration(0)
         durationRef.current = setInterval(() => {
           setCallDuration((prev) => prev + 1)
         }, 1000)
-      } else if (newPhase === 'idle') {
+      } else {
         if (durationRef.current) {
           clearInterval(durationRef.current)
           durationRef.current = null
         }
         setCallDuration(0)
-        setCallPeerName('Người dùng')
-        setCallPeerAvatar(undefined)
+
+        if (newPhase === 'IDLE') {
+          setCallPeerName('Người dùng')
+          setCallPeerAvatar(undefined)
+        }
       }
     },
     onIncomingCall: (data: IncomingCallData) => {
@@ -300,10 +321,11 @@ function App() {
       />
 
       {/* Active call overlay */}
-      {callPhase !== 'idle' && (
+      {(callPhase === 'RINGING' || callPhase === 'IN_CALL') && (
         <VideoCallOverlay
           phase={callPhase}
           callType={callType}
+          ringingDirection={ringingDirection}
           peerName={peerName}
           peerAvatarUrl={peerAvatarUrl}
           durationSec={callDuration}

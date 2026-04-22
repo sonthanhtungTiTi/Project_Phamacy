@@ -1,8 +1,10 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
+  faAnglesLeft,
+  faAnglesRight,
   faBell,
   faCapsules,
   faChartLine,
@@ -21,11 +23,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const location = useLocation()
   const { user, logout } = useAuthStore()
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    return localStorage.getItem('adminSidebarCollapsed') === 'true'
+  })
+
+  const avatarSrc = user?.avatarUrl || user?.avatar
 
   const handleLogout = async () => {
     await logout()
     navigate('/login')
   }
+
+  useEffect(() => {
+    localStorage.setItem('adminSidebarCollapsed', String(isSidebarCollapsed))
+  }, [isSidebarCollapsed])
 
   const menuItems: Array<{ label: string; icon: IconDefinition; path: string }> = [
     { label: 'Dashboard', icon: faChartLine, path: '/dashboard' },
@@ -37,44 +48,83 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   ]
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-50">
       {/* Sidebar */}
-      <div className="w-64 bg-white shadow-lg flex flex-col">
+      <div
+        className={`relative flex flex-col bg-white shadow-lg transition-all duration-300 ease-in-out ${
+          isSidebarCollapsed ? 'w-20' : 'w-64'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => setIsSidebarCollapsed((prev) => !prev)}
+          className="absolute -right-3 top-4 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 shadow transition hover:text-blue-600"
+          aria-expanded={!isSidebarCollapsed}
+          aria-label={isSidebarCollapsed ? 'Mở rộng sidebar' : 'Thu gọn sidebar'}
+          title={isSidebarCollapsed ? 'Mở rộng sidebar' : 'Thu gọn sidebar'}
+        >
+          <FontAwesomeIcon icon={isSidebarCollapsed ? faAnglesRight : faAnglesLeft} className="text-xs" />
+        </button>
+
         {/* Logo */}
-        <div className="px-6 py-8 border-b">
-          <div className="flex items-center gap-2 font-bold text-xl text-blue-600">
+        <div
+          className={`border-b transition-all duration-300 ${
+            isSidebarCollapsed ? 'px-3 py-6' : 'px-6 py-8'
+          }`}
+        >
+          <div
+            className={`flex items-center font-bold text-xl text-blue-600 ${
+              isSidebarCollapsed ? 'justify-center' : 'gap-2'
+            }`}
+          >
             <FontAwesomeIcon icon={faCapsules} className="text-lg" />
-            <span>Clinical Azure</span>
+            {!isSidebarCollapsed && <span>Clinical Azure</span>}
           </div>
-          <p className="text-xs text-gray-500 mt-1">PHARMACY ADMIN</p>
+          {!isSidebarCollapsed && <p className="mt-1 text-xs text-gray-500">PHARMACY ADMIN</p>}
         </div>
 
         {/* Menu Items */}
-        <nav className="flex-1 px-4 py-6 space-y-2">
+        <nav className={`flex-1 space-y-2 py-6 transition-all duration-300 ${isSidebarCollapsed ? 'px-2' : 'px-4'}`}>
           {menuItems.map((item) => (
             <button
               key={item.path}
               onClick={() => navigate(item.path)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition ${
+              className={`group relative flex w-full items-center rounded-lg py-3 transition-all duration-300 ${
+                isSidebarCollapsed ? 'justify-center px-0' : 'gap-3 px-4'
+              } ${
                 location.pathname === item.path
-                  ? 'bg-blue-50 text-blue-700 font-medium'
+                  ? 'bg-blue-50 font-medium text-blue-700'
                   : 'text-gray-700 hover:bg-blue-50'
               }`}
+              title={isSidebarCollapsed ? item.label : undefined}
             >
-              <FontAwesomeIcon icon={item.icon} className="w-4" />
-              <span className="text-sm font-medium">{item.label}</span>
+              <FontAwesomeIcon icon={item.icon} className="w-5" />
+              {!isSidebarCollapsed && <span className="text-sm font-medium">{item.label}</span>}
+              {isSidebarCollapsed && (
+                <span className="pointer-events-none absolute left-full top-1/2 ml-3 -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs text-white opacity-0 shadow transition-opacity duration-200 group-hover:opacity-100">
+                  {item.label}
+                </span>
+              )}
             </button>
           ))}
         </nav>
 
         {/* Logout Button */}
-        <div className="px-4 py-4 border-t">
+        <div className={`border-t py-4 ${isSidebarCollapsed ? 'px-2' : 'px-4'}`}>
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-4 py-3 text-red-600 rounded-lg hover:bg-red-50 transition"
+            className={`group relative flex w-full items-center rounded-lg py-3 text-red-600 transition-all duration-300 hover:bg-red-50 ${
+              isSidebarCollapsed ? 'justify-center px-0' : 'gap-3 px-4'
+            }`}
+            title={isSidebarCollapsed ? 'Logout' : undefined}
           >
-            <FontAwesomeIcon icon={faRightFromBracket} className="w-4" />
-            <span className="text-sm font-medium">Logout</span>
+            <FontAwesomeIcon icon={faRightFromBracket} className="w-5" />
+            {!isSidebarCollapsed && <span className="text-sm font-medium">Logout</span>}
+            {isSidebarCollapsed && (
+              <span className="pointer-events-none absolute left-full top-1/2 ml-3 -translate-y-1/2 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs text-white opacity-0 shadow transition-opacity duration-200 group-hover:opacity-100">
+                Logout
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -82,12 +132,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Topbar */}
-        <div className="h-20 bg-white shadow-sm border-b flex items-center justify-between px-8">
+        <div className="h-20 bg-white shadow-sm border-b flex items-center justify-between px-4 lg:px-8">
           <div className="flex-1">
             <input
               type="text"
               placeholder="Tìm kiếm đơn hàng, khách hàng..."
-              className="w-1/3 px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full max-w-md px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div className="flex items-center gap-6">
@@ -112,11 +162,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   <p className="text-sm font-medium text-gray-900">{user?.email}</p>
                   <p className="text-xs text-gray-500">{user?.role}</p>
                 </div>
-                <img
-                  src="https://via.placeholder.com/40"
-                  alt="Avatar"
-                  className="w-10 h-10 rounded-full"
-                />
+                {avatarSrc ? (
+                  <img
+                    src={avatarSrc}
+                    alt="Avatar"
+                    className="w-10 h-10 rounded-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none'
+                    }}
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm">
+                    {(user?.email?.[0] || 'A').toUpperCase()}
+                  </div>
+                )}
               </button>
 
               {showUserMenu && (
@@ -146,7 +205,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
 
         {/* Page Content */}
-        <div className="flex-1 overflow-auto p-8">
+        <div className="flex-1 overflow-auto p-4 lg:p-6">
           {children}
         </div>
       </div>

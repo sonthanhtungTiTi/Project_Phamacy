@@ -9,6 +9,8 @@ class ProductServiceError extends Error {
 	}
 }
 
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 const toProductCard = (product) => ({
 	id: product._id,
 	medicineCode: product.medicineCode,
@@ -19,6 +21,78 @@ const toProductCard = (product) => ({
 	images: product.images || '',
 	isActive: Boolean(product.isActive),
 })
+
+const toAiSearchItem = (product) => {
+	const totalStock = Array.isArray(product.inventory)
+		? product.inventory.reduce((sum, batch) => sum + Number(batch.quantity || 0), 0)
+		: 0
+
+	return {
+		id: String(product._id),
+		name: product.productName || product.medicineName || '',
+		price: Number(product.price || 0),
+		shortDescription: String(product.usageSummary || product.description || '').trim(),
+		image: String(product.images || '').trim(),
+		totalStock,
+	}
+}
+
+const findProductByKeyword = async (keyword, { limit = 5 } = {}) => {
+	const normalizedKeyword = String(keyword || '').trim()
+	if (!normalizedKeyword) {
+		return []
+	}
+
+	const safeLimit = Math.min(10, Math.max(1, Number(limit) || 5))
+	const regex = new RegExp(escapeRegex(normalizedKeyword), 'i')
+
+	const docs = await Product.find({
+		isActive: { $ne: false },
+		$or: [
+			{ productName: regex },
+			{ medicineName: regex },
+			{ medicineCode: regex },
+			{ categoryName: regex },
+			{ usageSummary: regex },
+			{ description: regex },
+			{ activeIngredient: regex },
+			{ additionalInfo: regex },
+		],
+	})
+		.select('_id productName medicineName price usageSummary description images inventory')
+		.sort({ updatedAt: -1 })
+		.limit(safeLimit)
+		.lean()
+
+	return docs.map(toAiSearchItem)
+}
+
+const searchProductsByKeyword = async ({ q, keyword, limit = 5 } = {}) => {
+	const resolvedKeyword = String(q || keyword || '').trim()
+	const safeLimit = Math.min(10, Math.max(1, Number(limit) || 5))
+
+	if (!resolvedKeyword) {
+		return {
+			keyword: '',
+			items: [],
+			meta: {
+				limit: safeLimit,
+				count: 0,
+			},
+		}
+	}
+
+	const items = await findProductByKeyword(resolvedKeyword, { limit: safeLimit })
+
+	return {
+		keyword: resolvedKeyword,
+		items,
+		meta: {
+			limit: safeLimit,
+			count: items.length,
+		},
+	}
+}
 
 const getProducts = async ({ categoryId, search, page = 1, limit = 20 }) => {
 	// Check if limit is 0 or "all" - if so, fetch all products
@@ -110,4 +184,6 @@ const getProductDetail = async (productId) => {
 module.exports = {
 	getProducts,
 	getProductDetail,
+	findProductByKeyword,
+	searchProductsByKeyword,
 }

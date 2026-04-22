@@ -3,6 +3,8 @@ const registerChatHandlers = require('./chatHandler')
 
 // Theo dõi người dùng đang online: userId -> { userId, role, name, socketIds:Set }
 const onlineUsers = new Map()
+const callSessions = new Map()
+const busyUsers = new Set()
 
 const serializeOnlineUsers = () =>
     Array.from(onlineUsers.values()).map((user) => ({
@@ -11,6 +13,42 @@ const serializeOnlineUsers = () =>
         name: user.name,
         socketCount: user.socketIds.size,
     }))
+
+const normalizeUserId = (value) => String(value || '')
+
+const isUserOnline = (userId) => {
+    const normalized = normalizeUserId(userId)
+    if (!normalized) return false
+
+    const onlineUser = onlineUsers.get(normalized)
+    return Boolean(onlineUser && onlineUser.socketIds && onlineUser.socketIds.size > 0)
+}
+
+const setUserBusy = (userId, isBusy) => {
+    const normalized = normalizeUserId(userId)
+    if (!normalized) return
+
+    if (isBusy) {
+        busyUsers.add(normalized)
+        return
+    }
+
+    busyUsers.delete(normalized)
+}
+
+const releaseCallSession = (callId) => {
+    const normalizedCallId = normalizeUserId(callId)
+    if (!normalizedCallId) return null
+
+    const session = callSessions.get(normalizedCallId)
+    if (!session) return null
+
+    callSessions.delete(normalizedCallId)
+    setUserBusy(session.callerId, false)
+    setUserBusy(session.calleeId, false)
+
+    return session
+}
 
 const setupCallHandlers = (io) => {
     // ==================== 1. MIDDLEWARE XÁC THỰC ====================
@@ -77,83 +115,169 @@ const setupCallHandlers = (io) => {
         // ==================== 3. CHAT AI + HUMAN SUPPORT ====================
         registerChatHandlers({ io, socket, onlineUsers })
 
-        // ==================== 4. WEBRTC SIGNALING LOGIC ====================
-        // Gửi yêu cầu gọi
-        socket.on('call:initiate', ({ targetUserId, callType, callId, callerData }) => {
-            if (!targetUserId) return
-            console.log(`[CALL] ${socket.userId} đang gọi ${targetUserId} (${callType})`)
-            
-            // Bắn tín hiệu sang phòng của người nhận (targetUserId)
-            socket.to(targetUserId.toString()).emit('call:incoming', {
+        // ==================== 4. CALL SIGNALING FOR PEERJS ====================
+        // Caller asks server to notify target user about a new incoming call.
+        socket.on('call:make', (payload = {}, callback) => {
+            const targetUserId = normalizeUserId(payload.targetUserId)
+            const callId = payload.callId
+            const callType = payload.callType === 'voice' ? 'voice' : 'video'
+            const callerUserId = normalizeUserId(socket.userId)
+
+            if (!targetUserId || !callId) {
+                if (typeof callback === 'function') {
+                    callback({ ok: false, reason: 'INVALID_PAYLOAD' })
+                }
+                return
+            }
+
+            if (!isUserOnline(targetUserId)) {
+                socket.emit('call:unavailable', {
+                    callId,
+                    targetUserId,
+                    reason: 'TARGET_OFFLINE',
+                })
+
+                if (typeof callback === 'function') {
+                    callback({ ok: false, reason: 'TARGET_OFFLINE' })
+                }
+                return
+            }
+
+            if (busyUsers.has(targetUserId) || busyUsers.has(callerUserId)) {
+                socket.emit('user-busy', {
+                    callId,
+                    targetUserId,
+                    reason: 'USER_BUSY',
+                })
+
+                if (typeof callback === 'function') {
+                    callback({ ok: false, reason: 'USER_BUSY' })
+                }
+                return
+            }
+
+            callSessions.set(callId, {
+                callId,
+                callerId: callerUserId,
+                calleeId: targetUserId,
+            })
+            setUserBusy(callerUserId, true)
+            setUserBusy(targetUserId, true)
+
+            socket.to(targetUserId).emit('call:incoming', {
                 callId,
                 callerId: socket.userId.toString(),
                 callType,
-                callerData: callerData || {
+                callerPeerId: normalizeUserId(payload.callerPeerId || socket.userId),
+                callerData: payload.callerData || {
                     userId: socket.userId.toString(),
                     name: socket.userName,
                     role: socket.userRole,
-                }, // Thông tin để hiển thị trên UI người nghe
+                },
             })
+
+            if (typeof callback === 'function') {
+                callback({ ok: true })
+            }
         })
 
-        // Gửi SDP Offer
-        socket.on('call:offer', ({ targetUserId, callId, offer }) => {
-            if (!targetUserId) return
-            socket.to(targetUserId.toString()).emit('call:offer', {
-                callId,
-                callerId: socket.userId.toString(),
-                offer,
-            })
-        })
+        socket.on('call:accept', (payload = {}) => {
+            const targetUserId = normalizeUserId(payload.targetUserId)
+            const callId = payload.callId
+            if (!targetUserId || !callId) return
 
-        // Gửi SDP Answer
-        socket.on('call:answer', ({ targetUserId, callId, answer }) => {
-            if (!targetUserId) return
-            socket.to(targetUserId.toString()).emit('call:answer', {
+            socket.to(targetUserId).emit('call:accepted', {
                 callId,
                 calleeId: socket.userId.toString(),
-                answer,
+                calleePeerId: normalizeUserId(payload.calleePeerId || socket.userId),
+                calleeData: payload.calleeData || {
+                    userId: socket.userId.toString(),
+                    name: socket.userName,
+                    role: socket.userRole,
+                },
             })
         })
 
-        // Gửi ICE Candidates (Network pathways)
-        socket.on('call:ice-candidate', ({ targetUserId, callId, candidate }) => {
-            if (!targetUserId) return
-            socket.to(targetUserId.toString()).emit('call:ice-candidate', {
-                callId,
-                senderId: socket.userId.toString(),
-                candidate,
-            })
-        })
+        socket.on('call:decline', (payload = {}) => {
+            const targetUserId = normalizeUserId(payload.targetUserId)
+            const callId = payload.callId
+            if (!targetUserId || !callId) return
 
-        // Hủy gọi / Từ chối / Kết thúc
-        socket.on('call:cancel', ({ targetUserId, callId }) => {
-            if (!targetUserId) return
-            socket.to(targetUserId.toString()).emit('call:cancel', {
-                callId,
-                senderId: socket.userId.toString(),
-            })
-        })
+            releaseCallSession(callId)
 
-        socket.on('call:reject', ({ targetUserId, callId }) => {
-            if (!targetUserId) return
-            socket.to(targetUserId.toString()).emit('call:reject', {
+            socket.to(targetUserId).emit('call:declined', {
                 callId,
                 senderId: socket.userId.toString(),
             })
         })
 
-        socket.on('call:end', ({ targetUserId, callId }) => {
-            if (!targetUserId) return
-            socket.to(targetUserId.toString()).emit('call:end', {
+        socket.on('call:cancel', (payload = {}) => {
+            const targetUserId = normalizeUserId(payload.targetUserId)
+            const callId = payload.callId
+            if (!targetUserId || !callId) return
+
+            releaseCallSession(callId)
+
+            socket.to(targetUserId).emit('call:cancelled', {
                 callId,
                 senderId: socket.userId.toString(),
+            })
+        })
+
+        socket.on('call:end', (payload = {}) => {
+            const targetUserId = normalizeUserId(payload.targetUserId)
+            const callId = payload.callId
+            if (!targetUserId || !callId) return
+
+            releaseCallSession(callId)
+
+            socket.to(targetUserId).emit('call:end', {
+                callId,
+                senderId: socket.userId.toString(),
+            })
+        })
+
+        socket.on('call-timeout', (payload = {}) => {
+            const targetUserId = normalizeUserId(payload.targetUserId)
+            const callId = payload.callId
+            if (!targetUserId || !callId) return
+
+            releaseCallSession(callId)
+
+            socket.to(targetUserId).emit('call-timeout', {
+                callId,
+                senderId: socket.userId.toString(),
+                reason: payload.reason || 'NO_ANSWER',
             })
         })
 
         // ==================== 5. NGẮT KẾT NỐI ====================
         socket.on('disconnect', () => {
             console.log(`🔌 Khách rời đi: ${socket.id} (User ID: ${socket.userId})`)
+
+            const disconnectedUserId = normalizeUserId(socket.userId)
+            const disconnectedSessions = []
+
+            callSessions.forEach((session, sessionId) => {
+                if (session.callerId === disconnectedUserId || session.calleeId === disconnectedUserId) {
+                    disconnectedSessions.push({ sessionId, session })
+                }
+            })
+
+            disconnectedSessions.forEach(({ sessionId, session }) => {
+                releaseCallSession(sessionId)
+
+                const otherUserId =
+                    session.callerId === disconnectedUserId ? session.calleeId : session.callerId
+
+                socket.to(otherUserId).emit('call:end', {
+                    callId: sessionId,
+                    senderId: disconnectedUserId,
+                    reason: 'USER_DISCONNECTED',
+                })
+            })
+
+            setUserBusy(disconnectedUserId, false)
 
             const existingUser = onlineUsers.get(socket.userId)
             if (existingUser) {
@@ -168,7 +292,7 @@ const setupCallHandlers = (io) => {
         })
     })
 
-    console.log('✅ Socket.io Call Handlers Initialized (Point-to-Point Mode)')
+    console.log('✅ Socket.io Call Handlers Initialized (PeerJS Mode)')
 }
 
 module.exports = setupCallHandlers
