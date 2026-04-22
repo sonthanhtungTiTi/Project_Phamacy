@@ -1,1292 +1,1186 @@
+const axios = require('axios')
 const mongoose = require('mongoose')
 
-const ChatConversation = require('../../models/chatConversation.model')
-const ChatMessage = require('../../models/chatMessage.model')
+// const ChatConversation = require('../../models/chatConversation.model')
+// const ChatMessage = require('../../models/chatMessage.model')
 const Product = require('../../models/product.model')
 const Order = require('../../models/order.model')
 const User = require('../../models/user.model')
-const { INTENTS, classifyIntent, generateReplyFromData, generatePhase2Reply } = require('../ai/ollama.service')
 
-class ChatServiceError extends Error {
-	constructor(message, statusCode = 400) {
-		super(message)
-		this.statusCode = statusCode
-	}
-}
+const OLLAMA_API_URL = process.env.OLLAMA_API_URL || 'http://localhost:11434/api/generate'
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:3b'
+const OLLAMA_QUERY_API_KEY = process.env.OLLAMA_QUERY_API_KEY || ''
+const OLLAMA_TIMEOUT_MS = Number(process.env.OLLAMA_TIMEOUT_MS || 30000)
+
+const DEFAULT_LIMIT = 20
+const MAX_LIMIT = 100
+const MAX_PIPELINE_STAGES = 20
+
+const WRITE_STAGES = new Set(['$out', '$merge'])
+const FORBIDDEN_OPERATORS = new Set(['$where', '$function', '$accumulator'])
+const READ_OPERATIONS = new Set(['find', 'aggregate', 'countDocuments'])
 
 const SUPPORT_ROLES = new Set(['admin', 'manager', 'pharmacist', 'sales_staff'])
 
+const INTENTS = {
+    CHAT: 'CHAT',
+    GENERAL_FAQ: 'GENERAL_FAQ',
+    FIND_PRODUCT: 'FIND_PRODUCT',
+    QUERY_PRODUCT: 'QUERY_PRODUCT',
+    CALL_HUMAN: 'CALL_HUMAN',
+    SOCIAL_CHAT: 'SOCIAL_CHAT',
+    CONSULTATION: 'CONSULTATION',
+}
+
+const SOCIAL_HINT_REGEX = /\b(chao|xin chao|hello|hi|alo|cam on|thank|thanks|tam biet|bye|chuc ngu ngon)\b/i
+const HUMAN_HINT_REGEX = /\b(nhan\s?vien|nguoi\s?that|gap\s?tu\s?van\s?vien|goi\s?dien)\b/i
+const PRODUCT_HINT_REGEX = /\b(thuoc|san\s?pham|tu\s?van|trieu\s?chung|dau|ho|sot|ngua|viem|tieu\s?chay|buon\s?non|chong\s?mat)\b/i
+
+const SYMPTOM_KEYWORDS = [
+    'dau hong',
+    'nghet mui',
+    'so mui',
+    'kho tho',
+    'dau bung',
+    'dau dau',
+    'dau lung',
+    'dau rang',
+    'dau co',
+    'dau khop',
+    'dau vai',
+    'dau nguc',
+    'mat ngu',
+    'met moi',
+    'chong mat',
+    'buon non',
+    'non',
+    'tieu chay',
+    'tao bon',
+    'day bung',
+    'khong tieu',
+    'ho',
+    'sot',
+    'cam',
+    'cum',
+    'di ung',
+    'ngua',
+    'man do',
+    'noi me day',
+    'viem',
+    'viem hong',
+    'viem mui',
+    'viem xoang',
+]
+
+const QUERY_STOPWORDS = new Set([
+    'toi',
+    'minh',
+    'ban',
+    'xin',
+    'nho',
+    'giup',
+    'tu',
+    'van',
+    'thuoc',
+    'san',
+    'pham',
+    'can',
+    'tim',
+    'kiem',
+    'tra',
+    'cuu',
+    'dang',
+    'bi',
+    'cho',
+    'voi',
+])
+
+const PRODUCT_DETAIL_FIELDS =
+    '_id medicineCode productName medicineName categoryName price usageSummary usage description targetUsers mainIngredients activeIngredient ingredients brand images updatedAt'
+
+class ChatServiceError extends Error {
+    constructor(message, statusCode = 400) {
+        super(message)
+        this.statusCode = statusCode
+    }
+}
+
 const ensureObjectId = (value, fieldName) => {
-	if (!mongoose.Types.ObjectId.isValid(value)) {
-		throw new ChatServiceError(`${fieldName} is invalid`, 400)
-	}
+    if (!mongoose.Types.ObjectId.isValid(value)) {
+        throw new ChatServiceError(`${fieldName} is invalid`, 400)
+    }
 }
 
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+const normalizeText = (value = '') =>
+    String(value || '')
+        .replace(/[đĐ]/g, (char) => (char === 'Đ' ? 'D' : 'd'))
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+
+const normalizeImageField = (value) => {
+    if (!value) {
+        return ''
+    }
+
+    if (Array.isArray(value)) {
+        const first = value.find((item) => typeof item === 'string' && item.trim())
+        return first ? String(first).trim() : ''
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim()
+        if (!trimmed) {
+            return ''
+        }
+
+        if (trimmed.startsWith('[')) {
+            try {
+                const parsed = JSON.parse(trimmed)
+                return normalizeImageField(parsed)
+            } catch {
+                // Ignore parse error and continue fallback parsing.
+            }
+        }
+
+        if (trimmed.includes(',')) {
+            const first = trimmed
+                .split(',')
+                .map((item) => item.trim())
+                .find(Boolean)
+            return first || ''
+        }
+
+        return trimmed
+    }
+
+    return ''
+}
+
+const pickRandomItems = (items, count) => {
+    if (!Array.isArray(items) || items.length === 0 || count <= 0) {
+        return []
+    }
+
+    if (items.length <= count) {
+        return items
+    }
+
+    const shuffled = [...items]
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1))
+        const tmp = shuffled[i]
+        shuffled[i] = shuffled[j]
+        shuffled[j] = tmp
+    }
+
+    return shuffled.slice(0, count)
+}
+
+const cleanJsonString = (text = '') => {
+    let value = String(text || '').trim()
+    if (!value) {
+        return '{}'
+    }
+
+    value = value
+        .replace(/```json/gi, '')
+        .replace(/```/g, '')
+        .replace(/[“”]/g, '"')
+        .replace(/[‘’]/g, "'")
+        .trim()
+
+    const start = value.indexOf('{')
+    const end = value.lastIndexOf('}')
+    if (start >= 0 && end > start) {
+        value = value.slice(start, end + 1)
+    }
+
+    value = value.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3')
+    value = value.replace(/'/g, '"')
+    value = value.replace(/,\s*([}\]])/g, '$1')
+
+    const openCurly = (value.match(/{/g) || []).length
+    const closeCurly = (value.match(/}/g) || []).length
+    if (openCurly > closeCurly) {
+        value += '}'.repeat(openCurly - closeCurly)
+    }
+
+    const openSquare = (value.match(/\[/g) || []).length
+    const closeSquare = (value.match(/\]/g) || []).length
+    if (openSquare > closeSquare) {
+        value += ']'.repeat(openSquare - closeSquare)
+    }
+
+    return value
+}
+
+const parseOllamaJson = (rawText, fallback = {}) => {
+    const cleaned = cleanJsonString(rawText)
+    try {
+        return JSON.parse(cleaned)
+    } catch {
+        return fallback
+    }
+}
+
 const toPlainUser = (value) => {
-	if (!value || typeof value !== 'object') {
-		return null
-	}
+    if (!value || typeof value !== 'object') {
+        return null
+    }
 
-	const userId = value._id || value.id
-	if (!userId) {
-		return null
-	}
+    const userId = value._id || value.id
+    if (!userId) {
+        return null
+    }
 
-	return {
-		id: String(userId),
-		fullName: value.fullName || '',
-		email: value.email || '',
-		phone: value.phone || '',
-		role: value.role || '',
-	}
+    return {
+        id: String(userId),
+        fullName: value.fullName || '',
+        email: value.email || '',
+        phone: value.phone || '',
+        role: value.role || '',
+    }
 }
 
 const serializeConversation = (doc) => ({
-	id: String(doc._id),
-	sessionId: doc.sessionId,
-	status: doc.status,
-	clientId: typeof doc.clientId === 'object' ? String(doc.clientId?._id || '') : String(doc.clientId || ''),
-	client: toPlainUser(doc.clientId),
-	assignedStaffId: typeof doc.assignedStaffId === 'object' ? String(doc.assignedStaffId?._id || '') : doc.assignedStaffId ? String(doc.assignedStaffId) : null,
-	assignedStaff: toPlainUser(doc.assignedStaffId),
-	lastIntent: doc.lastIntent || '',
-	lastAction: doc.lastAction || '',
-	lastMessageAt: doc.lastMessageAt,
-	unreadForClient: Number(doc.unreadForClient || 0),
-	unreadForAdmin: Number(doc.unreadForAdmin || 0),
-	metadata: doc.metadata || {},
-	createdAt: doc.createdAt,
-	updatedAt: doc.updatedAt,
+    id: String(doc._id),
+    sessionId: doc.sessionId,
+    status: doc.status,
+    clientId: typeof doc.clientId === 'object' ? String(doc.clientId?._id || '') : String(doc.clientId || ''),
+    client: toPlainUser(doc.clientId),
+    assignedStaffId: typeof doc.assignedStaffId === 'object' ? String(doc.assignedStaffId?._id || '') : doc.assignedStaffId ? String(doc.assignedStaffId) : null,
+    assignedStaff: toPlainUser(doc.assignedStaffId),
+    lastIntent: doc.lastIntent || '',
+    lastAction: doc.lastAction || '',
+    lastMessageAt: doc.lastMessageAt,
+    unreadForClient: Number(doc.unreadForClient || 0),
+    unreadForAdmin: Number(doc.unreadForAdmin || 0),
+    metadata: doc.metadata || {},
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
 })
 
 const serializeMessage = (doc) => ({
-	id: String(doc._id),
-	conversationId: String(doc.conversationId),
-	senderType: doc.senderType,
-	senderId: doc.senderId ? String(doc.senderId) : null,
-	senderName: doc.senderName || '',
-	content: doc.content,
-	intent: doc.intent || '',
-	action: doc.action || '',
-	meta: doc.meta || {},
-	createdAt: doc.createdAt,
-	updatedAt: doc.updatedAt,
+    id: String(doc._id),
+    conversationId: String(doc.conversationId),
+    senderType: doc.senderType,
+    senderId: doc.senderId ? String(doc.senderId) : null,
+    senderName: doc.senderName || '',
+    content: doc.content,
+    intent: doc.intent || '',
+    action: doc.action || '',
+    meta: doc.meta || {},
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
 })
 
-const createTransientMessage = ({ conversationId, senderType, senderId = null, senderName = '', content, intent = '', action = '', meta = {} }) => {
-	const now = new Date().toISOString()
-	return {
-		id: `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-		conversationId: String(conversationId),
-		senderType,
-		senderId: senderId ? String(senderId) : null,
-		senderName: String(senderName || '').trim(),
-		content: String(content || '').trim(),
-		intent,
-		action,
-		meta,
-		createdAt: now,
-		updatedAt: now,
-	}
-}
-
 const createSessionId = (clientId) =>
-	`conv_${String(clientId)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    `conv_${String(clientId)}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+const callOllama = async ({ prompt, system = '', temperature = 0.2, format } = {}) => {
+    const payload = {
+        model: OLLAMA_MODEL,
+        prompt,
+        system,
+        stream: false,
+        options: {
+            temperature,
+        },
+    }
+
+    if (format !== undefined && format !== null && String(format).trim() !== '') {
+        payload.format = format
+    }
+
+    const headers = {}
+    if (OLLAMA_QUERY_API_KEY) {
+        headers.Authorization = `Bearer ${OLLAMA_QUERY_API_KEY}`
+    }
+
+    const response = await axios.post(OLLAMA_API_URL, payload, {
+        timeout: OLLAMA_TIMEOUT_MS,
+        headers,
+    })
+
+    return String(response?.data?.response || '').trim()
+}
 
 const findOrCreateActiveConversation = async (clientId) => {
-	ensureObjectId(clientId, 'clientId')
+    ensureObjectId(clientId, 'clientId')
 
-	let conversation = await ChatConversation.findOne({
-		clientId,
-		status: { $in: ['ai', 'human_pending', 'human'] },
-	})
-		.sort({ updatedAt: -1 })
-		.populate('clientId', 'fullName email phone role')
-		.populate('assignedStaffId', 'fullName email phone role')
+    // Always return a virtual conversation without database persistence
+    const virtualConversation = {
+        _id: new mongoose.Types.ObjectId(),
+        sessionId: createSessionId(clientId),
+        clientId,
+        status: 'ai',
+        lastIntent: INTENTS.GENERAL_FAQ,
+        lastAction: INTENTS.GENERAL_FAQ,
+        metadata: {},
+        unreadForClient: 0,
+        unreadForAdmin: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    }
 
-	if (!conversation) {
-		conversation = await ChatConversation.create({
-			sessionId: createSessionId(clientId),
-			clientId,
-			status: 'ai',
-			lastIntent: INTENTS.GENERAL_FAQ,
-			lastAction: INTENTS.GENERAL_FAQ,
-		})
-
-		conversation = await ChatConversation.findById(conversation._id)
-			.populate('clientId', 'fullName email phone role')
-			.populate('assignedStaffId', 'fullName email phone role')
-	}
-
-	return conversation
+    return virtualConversation
 }
 
-const appendMessage = async ({ conversationId, senderType, senderId = null, senderName = '', content, intent = '', action = '', meta = {} }) => {
-	if (!content || !String(content).trim()) {
-		throw new ChatServiceError('Message content is required', 400)
-	}
+const appendMessage = async ({
+    conversationId,
+    senderType,
+    senderId = null,
+    senderName = '',
+    content,
+    intent = '',
+    action = '',
+    meta = {},
+}) => {
+    if (!content || !String(content).trim()) {
+        throw new ChatServiceError('Message content is required', 400)
+    }
 
-	ensureObjectId(conversationId, 'conversationId')
+    // Return a virtual message object without saving to the database
+    const message = {
+        _id: new mongoose.Types.ObjectId(),
+        conversationId,
+        senderType,
+        senderId: senderId && mongoose.Types.ObjectId.isValid(senderId) ? senderId : null,
+        senderName: String(senderName || '').trim(),
+        content: String(content).trim(),
+        intent,
+        action,
+        meta,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    }
 
-	const message = await ChatMessage.create({
-		conversationId,
-		senderType,
-		senderId: senderId && mongoose.Types.ObjectId.isValid(senderId) ? senderId : null,
-		senderName: String(senderName || '').trim(),
-		content: String(content).trim(),
-		intent,
-		action,
-		meta,
-	})
-
-	const baseUpdate = {
-		$set: {
-			lastMessageAt: new Date(),
-		},
-	}
-
-	if (senderType === 'user') {
-		baseUpdate.$set.unreadForClient = 0
-		baseUpdate.$inc = { unreadForAdmin: 1 }
-	}
-
-	if (senderType === 'admin') {
-		baseUpdate.$set.unreadForAdmin = 0
-		baseUpdate.$inc = { unreadForClient: 1 }
-	}
-
-	if (senderType === 'bot' || senderType === 'system') {
-		baseUpdate.$inc = { unreadForClient: 1 }
-	}
-
-	await ChatConversation.findByIdAndUpdate(conversationId, baseUpdate)
-
-	return message
+    return message
 }
 
 const getConversationMessages = async (conversationId, limit = 40) => {
-	ensureObjectId(conversationId, 'conversationId')
-	const safeLimit = Math.min(200, Math.max(1, Number(limit) || 40))
-
-	const docs = await ChatMessage.find({ conversationId })
-		.sort({ createdAt: -1 })
-		.limit(safeLimit)
-		.lean()
-
-	return docs.reverse().map(serializeMessage)
+    // Return an empty array as we no longer persist messages
+    return []
 }
 
 const touchConversation = async (conversationId, payload = {}) => {
-	ensureObjectId(conversationId, 'conversationId')
-
-	const updatePayload = {
-		...payload,
-		lastMessageAt: new Date(),
-	}
-
-	await ChatConversation.findByIdAndUpdate(conversationId, {
-		$set: updatePayload,
-	})
-
-	return ChatConversation.findById(conversationId)
-		.populate('clientId', 'fullName email phone role')
-		.populate('assignedStaffId', 'fullName email phone role')
+    // Return a virtual conversation object based on the payload
+    return {
+        _id: conversationId,
+        ...payload,
+        lastMessageAt: new Date(),
+        updatedAt: new Date(),
+    }
 }
 
 const getClientConversationSnapshot = async (clientId, { limit = 40 } = {}) => {
-	const conversation = await findOrCreateActiveConversation(clientId)
-	const messages = await getConversationMessages(conversation._id, limit)
+    const conversation = await findOrCreateActiveConversation(clientId)
+    const messages = [] // No persistent messages
 
-	await ChatConversation.findByIdAndUpdate(conversation._id, {
-		$set: { unreadForClient: 0 },
-	})
-
-	return {
-		conversation: serializeConversation(conversation),
-		messages,
-	}
+    return {
+        conversation: serializeConversation(conversation),
+        messages,
+    }
 }
 
 const getClientMessages = async (clientId, conversationId, { limit = 40 } = {}) => {
-	ensureObjectId(clientId, 'clientId')
-	ensureObjectId(conversationId, 'conversationId')
+    // Return a virtual state as we don't persist
+    const conversation = {
+        _id: conversationId,
+        clientId,
+        status: 'ai',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    }
 
-	const conversation = await ChatConversation.findOne({
-		_id: conversationId,
-		clientId,
-	})
-		.populate('clientId', 'fullName email phone role')
-		.populate('assignedStaffId', 'fullName email phone role')
-
-	if (!conversation) {
-		throw new ChatServiceError('Conversation not found', 404)
-	}
-
-	const messages = await getConversationMessages(conversationId, limit)
-	await ChatConversation.findByIdAndUpdate(conversationId, {
-		$set: { unreadForClient: 0 },
-	})
-
-	return {
-		conversation: serializeConversation(conversation),
-		messages,
-	}
+    return {
+        conversation: serializeConversation(conversation),
+        messages: [],
+    }
 }
 
 const requestHumanFromClient = async (clientId, conversationId = null, reason = '') => {
-	ensureObjectId(clientId, 'clientId')
+    ensureObjectId(clientId, 'clientId')
 
-	let conversation = null
-	if (conversationId) {
-		ensureObjectId(conversationId, 'conversationId')
-		conversation = await ChatConversation.findOne({ _id: conversationId, clientId })
-	}
+    // Always create a new virtual conversation for the request
+    const conversation = {
+        _id: conversationId || new mongoose.Types.ObjectId(),
+        clientId,
+        status: 'human_pending',
+        lastAction: INTENTS.CALL_HUMAN,
+        metadata: {
+            lastHumanRequestReason: String(reason || '').trim(),
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    }
 
-	if (!conversation) {
-		conversation = await findOrCreateActiveConversation(clientId)
-	}
+    const systemMessage = await appendMessage({
+        conversationId: conversation._id,
+        senderType: 'system',
+        content: 'Yeu cau ho tro voi nhan vien da duoc ghi nhan. Vui long doi trong giay lat.',
+        action: INTENTS.CALL_HUMAN,
+        meta: {
+            reason: String(reason || '').trim(),
+        },
+    })
 
-	let switchedToPending = false
-
-	if (conversation.status !== 'human' && conversation.status !== 'human_pending') {
-		conversation = await touchConversation(conversation._id, {
-			status: 'human_pending',
-			assignedStaffId: null,
-			lastAction: INTENTS.CALL_HUMAN,
-			metadata: {
-				...(conversation.metadata || {}),
-				lastHumanRequestReason: String(reason || '').trim(),
-			},
-		})
-		switchedToPending = true
-	}
-
-	let systemMessage = null
-	if (conversation.status === 'human_pending' && switchedToPending) {
-		systemMessage = await appendMessage({
-			conversationId: conversation._id,
-			senderType: 'system',
-			content: 'Yeu cau ho tro voi nhan vien da duoc ghi nhan. Vui long doi trong giay lat.',
-			action: INTENTS.CALL_HUMAN,
-			meta: {
-				reason: String(reason || '').trim(),
-			},
-		})
-	}
-
-	conversation = await ChatConversation.findById(conversation._id)
-		.populate('clientId', 'fullName email phone role')
-		.populate('assignedStaffId', 'fullName email phone role')
-
-	return {
-		conversation: serializeConversation(conversation),
-		systemMessage: systemMessage ? serializeMessage(systemMessage) : null,
-	}
+    return {
+        conversation: serializeConversation(conversation),
+        systemMessage: serializeMessage(systemMessage),
+    }
 }
 
 const ensureStaffCanAccessConversation = async (staffId, conversationId) => {
-	ensureObjectId(staffId, 'staffId')
-	ensureObjectId(conversationId, 'conversationId')
+    ensureObjectId(staffId, 'staffId')
+    ensureObjectId(conversationId, 'conversationId')
 
-	const staff = await User.findById(staffId).select('_id fullName email phone role').lean()
-	if (!staff) {
-		throw new ChatServiceError('Staff user not found', 404)
-	}
+    const staff = await User.findById(staffId).select('_id fullName email phone role').lean()
+    if (!staff) {
+        throw new ChatServiceError('Staff user not found', 404)
+    }
 
-	if (!SUPPORT_ROLES.has(staff.role)) {
-		throw new ChatServiceError('Only support staff can access this conversation', 403)
-	}
+    if (!SUPPORT_ROLES.has(staff.role)) {
+        throw new ChatServiceError('Only support staff can access this conversation', 403)
+    }
 
-	const conversation = await ChatConversation.findById(conversationId)
-		.populate('clientId', 'fullName email phone role')
-		.populate('assignedStaffId', 'fullName email phone role')
+    // Return a virtual conversation
+    const conversation = {
+        _id: conversationId,
+        status: 'human',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+    }
 
-	if (!conversation) {
-		throw new ChatServiceError('Conversation not found', 404)
-	}
-
-	return { staff, conversation }
+    return { staff, conversation }
 }
 
 const assignConversationToStaff = async (conversationId, { staffId, staffName = '' }) => {
-	const { staff, conversation } = await ensureStaffCanAccessConversation(staffId, conversationId)
+    const { staff, conversation } = await ensureStaffCanAccessConversation(staffId, conversationId)
 
-	const nextStaffName = String(staffName || staff.fullName || 'Nhan vien').trim()
+    const nextStaffName = String(staffName || staff.fullName || 'Nhan vien').trim()
+    const updated = await touchConversation(conversation._id, {
+        status: 'human',
+        assignedStaffId: staff._id,
+        lastAction: INTENTS.CALL_HUMAN,
+        unreadForAdmin: 0,
+    })
 
-	const updated = await touchConversation(conversation._id, {
-		status: 'human',
-		assignedStaffId: staff._id,
-		lastAction: INTENTS.CALL_HUMAN,
-		unreadForAdmin: 0,
-	})
+    const systemMessage = await appendMessage({
+        conversationId: conversation._id,
+        senderType: 'system',
+        senderId: staff._id,
+        senderName: nextStaffName,
+        content: `Nhan vien ${nextStaffName} da tham gia ho tro.`,
+        action: INTENTS.CALL_HUMAN,
+    })
 
-	const systemMessage = await appendMessage({
-		conversationId: conversation._id,
-		senderType: 'system',
-		senderId: staff._id,
-		senderName: nextStaffName,
-		content: `Nhan vien ${nextStaffName} da tham gia ho tro.`,
-		action: INTENTS.CALL_HUMAN,
-	})
-
-	const hydrated = await ChatConversation.findById(updated._id)
-		.populate('clientId', 'fullName email phone role')
-		.populate('assignedStaffId', 'fullName email phone role')
-
-	return {
-		conversation: serializeConversation(hydrated),
-		systemMessage: serializeMessage(systemMessage),
-	}
+    return {
+        conversation: serializeConversation(updated),
+        systemMessage: serializeMessage(systemMessage),
+    }
 }
 
 const closeConversationByStaff = async (conversationId, staffId) => {
-	const { conversation } = await ensureStaffCanAccessConversation(staffId, conversationId)
+    const { conversation } = await ensureStaffCanAccessConversation(staffId, conversationId)
 
-	await touchConversation(conversation._id, {
-		status: 'closed',
-		lastAction: 'CLOSED_BY_STAFF',
-		unreadForAdmin: 0,
-	})
+    const updated = await touchConversation(conversation._id, {
+        status: 'closed',
+        lastAction: 'CLOSED_BY_STAFF',
+        unreadForAdmin: 0,
+    })
 
-	const systemMessage = await appendMessage({
-		conversationId: conversation._id,
-		senderType: 'system',
-		senderId: staffId,
-		content: 'Cuoc tro chuyen da duoc ket thuc boi nhan vien.',
-		action: 'CLOSED_BY_STAFF',
-	})
+    const systemMessage = await appendMessage({
+        conversationId: conversation._id,
+        senderType: 'system',
+        senderId: staffId,
+        content: 'Cuoc tro chuyen da duoc ket thuc boi nhan vien.',
+        action: 'CLOSED_BY_STAFF',
+    })
 
-	const hydrated = await ChatConversation.findById(conversation._id)
-		.populate('clientId', 'fullName email phone role')
-		.populate('assignedStaffId', 'fullName email phone role')
-
-	return {
-		conversation: serializeConversation(hydrated),
-		systemMessage: serializeMessage(systemMessage),
-	}
+    return {
+        conversation: serializeConversation(updated),
+        systemMessage: serializeMessage(systemMessage),
+    }
 }
 
 const listConversationsForAdmin = async ({ status = 'all', page = 1, limit = 20, keyword = '' } = {}) => {
-	const safePage = Math.max(1, Number(page) || 1)
-	const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20))
-	const skip = (safePage - 1) * safeLimit
-
-	const filter = {}
-	if (status && status !== 'all') {
-		filter.status = String(status)
-	}
-
-	const normalizedKeyword = String(keyword || '').trim()
-	if (normalizedKeyword) {
-		const regex = new RegExp(escapeRegex(normalizedKeyword), 'i')
-		const candidateUsers = await User.find({
-			$or: [{ fullName: regex }, { email: regex }, { phone: regex }],
-		})
-			.select('_id')
-			.lean()
-
-		const candidateUserIds = candidateUsers.map((item) => item._id)
-		filter.$or = [{ sessionId: regex }, { clientId: { $in: candidateUserIds } }]
-	}
-
-	const [items, total] = await Promise.all([
-		ChatConversation.find(filter)
-			.sort({ lastMessageAt: -1 })
-			.skip(skip)
-			.limit(safeLimit)
-			.populate('clientId', 'fullName email phone role')
-			.populate('assignedStaffId', 'fullName email phone role')
-			.lean(),
-		ChatConversation.countDocuments(filter),
-	])
-
-	const ids = items.map((item) => item._id)
-	const latestMessages = ids.length
-		? await ChatMessage.aggregate([
-				{ $match: { conversationId: { $in: ids } } },
-				{ $sort: { createdAt: -1 } },
-				{
-					$group: {
-						_id: '$conversationId',
-						content: { $first: '$content' },
-						senderType: { $first: '$senderType' },
-						createdAt: { $first: '$createdAt' },
-					},
-				},
-			])
-		: []
-
-	const latestByConversationId = new Map(latestMessages.map((item) => [String(item._id), item]))
-
-	const rows = items.map((item) => {
-		const serialized = serializeConversation(item)
-		const latest = latestByConversationId.get(String(item._id))
-		return {
-			...serialized,
-			latestMessage: latest
-				? {
-					content: latest.content,
-					senderType: latest.senderType,
-					createdAt: latest.createdAt,
-				}
-				: null,
-		}
-	})
-
-	return {
-		items: rows,
-		pagination: {
-			page: safePage,
-			limit: safeLimit,
-			total,
-			totalPages: Math.max(1, Math.ceil(total / safeLimit)),
-		},
-	}
+    // Return empty results as we don't persist conversations
+    return {
+        items: [],
+        pagination: {
+            page: 1,
+            limit: 20,
+            total: 0,
+            totalPages: 1,
+        },
+    }
 }
 
 const getConversationMessagesForAdmin = async (staffId, conversationId, { limit = 80 } = {}) => {
-	const { conversation } = await ensureStaffCanAccessConversation(staffId, conversationId)
-	const messages = await getConversationMessages(conversationId, limit)
+    const { conversation } = await ensureStaffCanAccessConversation(staffId, conversationId)
+    const messages = [] // No persistent messages
 
-	await ChatConversation.findByIdAndUpdate(conversationId, {
-		$set: { unreadForAdmin: 0 },
-	})
-
-	return {
-		conversation: serializeConversation(conversation),
-		messages,
-	}
+    return {
+        conversation: serializeConversation(conversation),
+        messages,
+    }
 }
 
-const extractOrderCode = (text) => {
-	const match = String(text || '').toUpperCase().match(/ORD[0-9]{8,}/)
-	return match ? match[0] : ''
+const splitImages = (images) =>
+    String(images || '')
+        .split(';')
+        .map((item) => item.trim())
+        .filter(Boolean)
+
+const cleanImageUrl = (url) => {
+    if (!url) return ''
+
+    const marker = 'quality_95/'
+    const index = url.indexOf(marker)
+
+    if (index !== -1) {
+        return url.substring(index + marker.length)
+    }
+
+    return url
 }
+const toProductCard = (doc) => {
+    const id = String(doc._id || doc.id || '')
 
-const normalizeText = (value) =>
-	String(value || '')
-		.replace(/[đĐ]/g, (char) => (char === 'Đ' ? 'D' : 'd'))
-		.normalize('NFD')
-		.replace(/[\u0300-\u036f]/g, '')
-		.toLowerCase()
 
-const PRODUCT_LOOKUP_HINT_REGEX = /\b(tim|tra\s?cuu|san\s?pham|thuoc|gia|hoat\s?chat|con\s?hang)\b/i
-const ORDER_LOOKUP_HINT_REGEX = /\b(don\s?hang|ma\s?don|trang\s?thai|van\s?don|giao\s?hang|thanh\s?toan|ord[0-9]{6,})\b/i
-const SYMPTOM_QUERY_HINT_REGEX = /\b(bi|dang bi|cam thay|met|khong khoe|trieu chung|dau|ho|sot|ngua|viem|tieu chay|buon non|chong mat)\b/i
-const SYMPTOM_KEYWORDS = [
-	'dau hong',
-	'nghet mui',
-	'so mui',
-	'kho tho',
-	'dau bung',
-	'dau dau',
-	'dau lung',
-	'dau rang',
-	'dau co',
-	'dau khop',
-	'dau vai',
-	'dau nguc',
-	'mat ngu',
-	'met moi',
-	'chong mat',
-	'buon non',
-	'non',
-	'tieu chay',
-	'tao bon',
-	'day bung',
-	'khong tieu',
-	'ho',
-	'sot',
-	'sỏt',
-	'cam',
-	'cum',
-	'di ung',
-	'ngua',
-	'man do',
-	'noi me day',
-	'viem',
-	'viem hong',
-	'viem mui',
-	'viem xoang',
-]
+    const imageList = splitImages(doc?.images || '')
+    const cleanedImages = imageList.map((img) => cleanImageUrl(img))
 
-const VIETNAMESE_CHAR_GROUPS = {
-	a: 'aAàáạảãâầấậẩẫăằắặẳẵ',
-	d: 'dDđĐ',
-	e: 'eEèéẹẻẽêềếệểễ',
-	i: 'iIìíịỉĩ',
-	o: 'oOòóọỏõôồốộổỗơờớợởỡ',
-	u: 'uUùúụủũưừứựửữ',
-	y: 'yYỳýỵỷỹ',
-}
 
-const formatCurrencyVnd = (value) => {
-	const amount = Number(value || 0)
-	if (!Number.isFinite(amount)) {
-		return '0 VND'
-	}
-
-	return `${Math.round(amount).toLocaleString('vi-VN')} VND`
-}
-
-const normalizeImageField = (value) => {
-	if (!value) {
-		return ''
-	}
-
-	if (Array.isArray(value)) {
-		const first = value.find((item) => typeof item === 'string' && item.trim())
-		return first ? String(first).trim() : ''
-	}
-
-	if (typeof value === 'string') {
-		const trimmed = value.trim()
-		if (!trimmed) {
-			return ''
-		}
-
-		if (trimmed.startsWith('[')) {
-			try {
-				const parsed = JSON.parse(trimmed)
-				return normalizeImageField(parsed)
-			} catch {
-				// Ignore parse error and continue fallback parsing.
-			}
-		}
-
-		if (trimmed.includes(',')) {
-			const first = trimmed
-				.split(',')
-				.map((item) => item.trim())
-				.find(Boolean)
-			return first || ''
-		}
-
-		return trimmed
-	}
-
-	return ''
+    return {
+        id,
+        productName: doc.productName || doc.medicineName || 'San pham',
+        imageUrl: normalizeImageField(cleanedImages[0]),
+        price: Number(doc.price || 0),
+        productUrl: `http://localhost:5173/product/${id}`,
+    }
 }
 
 const extractSymptomKeyword = (text) => {
-	const normalized = normalizeText(text)
-	if (!normalized) {
-		return ''
-	}
+    const normalized = normalizeText(text)
+    if (!normalized) {
+        return ''
+    }
 
-	const matched = [...SYMPTOM_KEYWORDS]
-		.sort((a, b) => b.length - a.length)
-		.find((keyword) => normalized.includes(normalizeText(keyword)))
-	if (matched) {
-		return matched
-	}
+    const matched = [...SYMPTOM_KEYWORDS]
+        .sort((a, b) => b.length - a.length)
+        .find((keyword) => normalized.includes(normalizeText(keyword)))
+    if (matched) {
+        return matched
+    }
 
-	const longSymptomMatch = normalized.match(/\b(dau\s?[a-z]{2,}|viem\s?[a-z]{2,}|nghet\s?mui|so\s?mui|kho\s?tho|tieu\s?chay|buon\s?non|chong\s?mat|mat\s?ngu|met\s?moi)\b/)
-	if (longSymptomMatch) {
-		return String(longSymptomMatch[0]).trim()
-	}
-
-	const genericSymptomMatch = normalized.match(/\b(dau\s?[a-z]+|ho|sot|cam|cum|ngua|met\s?moi|chong\s?mat|buon\s?non|tieu\s?chay)\b/)
-	return genericSymptomMatch ? String(genericSymptomMatch[0]).trim() : ''
+    const patternMatch = normalized.match(
+        /\b(dau\s?[a-z]{2,}|viem\s?[a-z]{2,}|nghet\s?mui|so\s?mui|kho\s?tho|tieu\s?chay|buon\s?non|chong\s?mat|mat\s?ngu|met\s?moi|ho|sot|cam|cum)\b/,
+    )
+    return patternMatch ? String(patternMatch[0]).trim() : ''
 }
 
-const buildVietnameseInsensitivePattern = (text) =>
-	String(text || '')
-		.split('')
-		.map((char) => {
-			if (/\s/.test(char)) {
-				return '\\s*'
-			}
+const tokenizeQuery = (text) => {
+    const normalized = normalizeText(text)
+    if (!normalized) {
+        return []
+    }
 
-			const normalizedChar = normalizeText(char)
-			const group = VIETNAMESE_CHAR_GROUPS[normalizedChar]
-			if (group) {
-				return `[${escapeRegex(group)}]`
-			}
-
-			return escapeRegex(char)
-		})
-		.join('')
-
-const SYMPTOM_STOPWORDS = new Set(['toi', 'bi', 'dang', 'cam', 'thay', 'khong', 'khoe', 'minh'])
-
-const buildSymptomSearchQueries = ({ content = '', symptomKeyword = '', intentResult = null }) => {
-	const rawCandidates = [
-		symptomKeyword,
-		intentResult?.keyword,
-		intentResult?.query,
-		intentResult?.message,
-		content,
-	]
-
-	const queries = []
-	const seen = new Set()
-
-	for (const raw of rawCandidates) {
-		const normalized = normalizeText(raw)
-		if (!normalized) {
-			continue
-		}
-
-		const compact = normalized.replace(/\s+/g, ' ').trim()
-		if (compact.length >= 3 && !seen.has(compact)) {
-			seen.add(compact)
-			queries.push(compact)
-		}
-
-		const tokens = compact
-			.split(' ')
-			.filter((token) => token.length >= 3 && !SYMPTOM_STOPWORDS.has(token))
-
-		for (const token of tokens) {
-			if (!seen.has(token)) {
-				seen.add(token)
-				queries.push(token)
-			}
-		}
-	}
-
-	return queries.slice(0, 8)
+    return normalized
+        .split(/\s+/)
+        .filter((token) => token.length >= 3 && !QUERY_STOPWORDS.has(token))
 }
 
-const scoreSymptomMatch = (item, queryList) => {
-	const usage = normalizeText(item.productName)
-	const productName = normalizeText(item.productName || item.medicineName)
-	if (!usage && !productName) {
-		return 0
-	}
+const hasForbiddenOperator = (value) => {
+    if (!value || typeof value !== 'object') {
+        return false
+    }
 
-	let score = 0
+    if (Array.isArray(value)) {
+        return value.some((item) => hasForbiddenOperator(item))
+    }
 
-	for (const query of queryList) {
-		const normalizedKeyword = normalizeText(query)
-		if (!normalizedKeyword) {
-			continue
-		}
+    for (const [key, child] of Object.entries(value)) {
+        if (FORBIDDEN_OPERATORS.has(key)) {
+            return true
+        }
+        if (hasForbiddenOperator(child)) {
+            return true
+        }
+    }
 
-		if (usage.includes(normalizedKeyword)) {
-			score += 120
-		}
-		if (productName.includes(normalizedKeyword)) {
-			score += 70
-		}
-
-		const tokens = normalizedKeyword
-			.split(/\s+/)
-			.filter((token) => token.length >= 3 && !SYMPTOM_STOPWORDS.has(token))
-
-		let tokenMatched = 0
-		for (const token of tokens) {
-			if (usage.includes(token)) {
-				score += 30
-				tokenMatched += 1
-			}
-			if (productName.includes(token)) {
-				score += 20
-				tokenMatched += 1
-			}
-		}
-
-		if (tokens.length > 1 && tokenMatched >= tokens.length) {
-			score += 40
-		}
-	}
-
-	return score
+    return false
 }
 
-const searchProductsBySymptom = async (queryInput) => {
-	const queryList = Array.isArray(queryInput)
-		? queryInput.map((item) => normalizeText(item)).filter(Boolean)
-		: [normalizeText(queryInput)].filter(Boolean)
+const sanitizeSort = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return { updatedAt: -1 }
+    }
 
-	if (queryList.length === 0) {
-		return []
-	}
+    const safeSort = {}
+    for (const [key, rawDirection] of Object.entries(value)) {
+        const direction = Number(rawDirection)
+        if (!key || Number.isNaN(direction)) {
+            continue
+        }
+        safeSort[key] = direction >= 0 ? 1 : -1
+    }
 
-	const phraseFilters = []
-	for (const query of queryList) {
-		const mongoRegex = new RegExp(buildVietnameseInsensitivePattern(query), 'i')
-		phraseFilters.push({ productName: { $regex: mongoRegex } })
-		phraseFilters.push({ medicineName: { $regex: mongoRegex } })
+    if (Object.keys(safeSort).length === 0) {
+        return { updatedAt: -1 }
+    }
 
-		const tokens = query.split(/\s+/).filter((token) => token.length >= 3)
-		for (const token of tokens) {
-			const tokenRegex = new RegExp(buildVietnameseInsensitivePattern(token), 'i')
-			phraseFilters.push({ productName: { $regex: tokenRegex } })
-			phraseFilters.push({ medicineName: { $regex: tokenRegex } })
-		}
-	}
-
-	const directMatches = await Product.find({
-		isActive: true,
-		$or: phraseFilters,
-	})
-		.select('_id productName medicineName images price usageSummary updatedAt')
-		.limit(120)
-		.lean()
-
-	let merged = directMatches
-
-	if (merged.length < 4) {
-		const fallbackCandidates = await Product.find({
-			isActive: true,
-			usageSummary: { $exists: true, $ne: '' },
-		})
-			.select('_id productName medicineName images price usageSummary updatedAt')
-			.sort({ updatedAt: -1 })
-			.limit(300)
-			.lean()
-
-		const knownIds = new Set(merged.map((item) => String(item._id)))
-		const filtered = fallbackCandidates.filter((item) => !knownIds.has(String(item._id)))
-		merged = merged.concat(filtered)
-	}
-
-	return merged
-		.map((item) => ({
-			id: String(item._id),
-			productName: item.productName || item.medicineName || 'San pham',
-			imageUrl: normalizeImageField(item.images),
-			price: Number(item.price || 0),
-			score: scoreSymptomMatch(item, queryList),
-			updatedAt: item.updatedAt,
-		}))
-		.filter((item) => item.score > 0)
-		.sort((a, b) => {
-			if (b.score !== a.score) {
-				return b.score - a.score
-			}
-			return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
-		})
-		.slice(0, 4)
-		.map((item) => ({
-			id: item.id,
-			productName: item.productName,
-			imageUrl: item.imageUrl,
-			price: item.price,
-		}))
+    return safeSort
 }
 
-const toProductLinkReply = (products) => {
-	if (!Array.isArray(products) || products.length === 0) {
-		return 'Không tìm thấy sản phẩm phù hợp'
-	}
+const sanitizeProjection = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null
+    }
 
-	return products.map((item) => `http://localhost:5173/product/${item.id}`).join('\n')
+    const projection = {}
+    for (const [key, raw] of Object.entries(value)) {
+        if (!key || key.startsWith('$')) {
+            continue
+        }
+        projection[key] = Number(raw) === 0 ? 0 : 1
+    }
+
+    return Object.keys(projection).length > 0 ? projection : null
 }
 
-const formatProductSuggestionText = (products) => {
-	if (!Array.isArray(products) || products.length === 0) {
-		return 'Không tìm thấy sản phẩm phù hợp'
-	}
+const normalizeReadOnlyQueryPlan = (rawPlan) => {
+    const operation = String(rawPlan?.operation || 'find').trim().toLowerCase()
+    if (!READ_OPERATIONS.has(operation)) {
+        throw new ChatServiceError('Unsupported query operation from AI', 400)
+    }
 
-	return 'Mình đã tìm thấy một số sản phẩm phù hợp. Bạn có thể bấm vào thẻ sản phẩm bên dưới để xem chi tiết.'
+    if (operation === 'countDocuments') {
+        const filter = rawPlan?.filter && typeof rawPlan.filter === 'object' ? rawPlan.filter : {}
+        if (hasForbiddenOperator(filter)) {
+            throw new ChatServiceError('Forbidden MongoDB operator in AI query', 400)
+        }
+        return {
+            operation,
+            filter,
+            limit: 1,
+        }
+    }
+
+    if (operation === 'aggregate') {
+        const pipeline = Array.isArray(rawPlan?.pipeline) ? rawPlan.pipeline : []
+        if (pipeline.length === 0) {
+            throw new ChatServiceError('AI aggregate pipeline is empty', 400)
+        }
+        if (pipeline.length > MAX_PIPELINE_STAGES) {
+            throw new ChatServiceError('AI aggregate pipeline is too large', 400)
+        }
+
+        for (const stage of pipeline) {
+            if (!stage || typeof stage !== 'object' || Array.isArray(stage)) {
+                throw new ChatServiceError('Invalid aggregate stage from AI', 400)
+            }
+            const stageKeys = Object.keys(stage)
+            if (stageKeys.length !== 1) {
+                throw new ChatServiceError('Each aggregate stage must contain a single operator', 400)
+            }
+            if (WRITE_STAGES.has(stageKeys[0])) {
+                throw new ChatServiceError('Write stages are not allowed', 400)
+            }
+            if (hasForbiddenOperator(stage)) {
+                throw new ChatServiceError('Forbidden MongoDB operator in AI query', 400)
+            }
+        }
+
+        return {
+            operation,
+            pipeline,
+            limit: Math.min(MAX_LIMIT, Math.max(1, Number(rawPlan?.limit) || DEFAULT_LIMIT)),
+        }
+    }
+
+    const filter = rawPlan?.filter && typeof rawPlan.filter === 'object' ? rawPlan.filter : {}
+    if (hasForbiddenOperator(filter)) {
+        throw new ChatServiceError('Forbidden MongoDB operator in AI query', 400)
+    }
+
+    const sort = sanitizeSort(rawPlan?.sort)
+    const projection = sanitizeProjection(rawPlan?.projection)
+
+    return {
+        operation,
+        filter,
+        sort,
+        projection,
+        limit: Math.min(MAX_LIMIT, Math.max(1, Number(rawPlan?.limit) || DEFAULT_LIMIT)),
+    }
 }
 
-const searchProducts = async (query) => {
-	const normalized = String(query || '').trim()
-	const filter = { isActive: true }
+const buildReadOnlyQueryPlanWithOllama = async ({ message, symptomKeyword = '' }) => {
+    const systemPrompt = [
+        'Ban la AI tao MongoDB query cho collection products trong nha thuoc.',
+        'Chi duoc tra ve JSON hop le, khong markdown.',
+        'Chi duoc doc du lieu, khong update/delete/insert.',
+        'Schema tra ve mot trong cac dang:',
+        '{"operation":"find","filter":{},"projection":{},"sort":{},"limit":20}',
+        '{"operation":"aggregate","pipeline":[{"$match":{}},{"$sort":{}},{"$limit":20}],"limit":20}',
+        '{"operation":"countDocuments","filter":{}}',
+    ].join(' ')
 
-	if (normalized) {
-		const regex = new RegExp(escapeRegex(normalized), 'i')
-		filter.$or = [
-			{ productName: regex },
-			{ medicineName: regex },
-			{ medicineCode: regex },
-			{ categoryName: regex },
-			{ brand: regex },
-		]
-	}
+    const prompt = [
+        `User message: "${String(message || '').trim()}"`,
+        `Symptom keyword: "${String(symptomKeyword || '').trim()}"`,
+        'Product fields: productName, medicineName, usageSummary, usage, description, targetUsers, activeIngredient, ingredients, mainIngredients, price, images, isActive, categoryName, brand, updatedAt.',
+        'Return JSON only.',
+    ].join('\n\n')
 
-	const docs = await Product.find(filter)
-		.select('medicineCode productName medicineName categoryName price usageSummary brand inventory')
-		.sort({ updatedAt: -1 })
-		.limit(5)
-		.lean()
+    const raw = await callOllama({
+        prompt,
+        system: systemPrompt,
+        temperature: 0,
+        format: 'json',
+    })
 
-	return docs.map((item) => ({
-		id: String(item._id),
-		medicineCode: item.medicineCode || '',
-		productName: item.productName || item.medicineName || '',
-		categoryName: item.categoryName || '',
-		brand: item.brand || '',
-		price: Number(item.price || 0),
-		usageSummary: item.usageSummary || '',
-		totalStock: Array.isArray(item.inventory)
-			? item.inventory.reduce((sum, batch) => sum + Number(batch.quantity || 0), 0)
-			: 0,
-	}))
+    return parseOllamaJson(raw, {})
+}
+
+const executeReadOnlyProductQueryPlan = async (rawPlan) => {
+    const plan = normalizeReadOnlyQueryPlan(rawPlan)
+
+    if (plan.operation === 'countDocuments') {
+        await Product.countDocuments({
+            $and: [{ isActive: true }, plan.filter || {}],
+        })
+        return []
+    }
+
+    if (plan.operation === 'aggregate') {
+        const pipeline = [{ $match: { isActive: true } }, ...plan.pipeline, { $limit: plan.limit }]
+        const docs = await Product.aggregate(pipeline)
+        return Array.isArray(docs) ? docs : []
+    }
+
+    const userFilter = plan.filter && Object.keys(plan.filter).length > 0 ? plan.filter : null
+    const filter = userFilter ? { $and: [{ isActive: true }, userFilter] } : { isActive: true }
+
+    const query = Product.find(filter)
+        .sort(plan.sort)
+        .limit(plan.limit)
+
+    if (plan.projection) {
+        query.select(plan.projection)
+    } else {
+        query.select(PRODUCT_DETAIL_FIELDS)
+    }
+
+    return query.lean()
+}
+
+const searchProductsByLocalRules = async ({ message, symptomKeyword = '' }) => {
+    const candidateQueries = [symptomKeyword, message].map((item) => String(item || '').trim()).filter(Boolean)
+    const conditions = []
+
+    for (const entry of candidateQueries) {
+        const normalized = normalizeText(entry)
+        if (!normalized) {
+            continue
+        }
+
+        const phraseRegex = new RegExp(escapeRegex(normalized).replace(/\s+/g, '.*'), 'i')
+        conditions.push({ productName: phraseRegex })
+        conditions.push({ medicineName: phraseRegex })
+        conditions.push({ usageSummary: phraseRegex })
+        conditions.push({ usage: phraseRegex })
+        conditions.push({ description: phraseRegex })
+        conditions.push({ activeIngredient: phraseRegex })
+        conditions.push({ ingredients: phraseRegex })
+        conditions.push({ mainIngredients: phraseRegex })
+
+        for (const token of tokenizeQuery(entry)) {
+            const tokenRegex = new RegExp(escapeRegex(token), 'i')
+            conditions.push({ productName: tokenRegex })
+            conditions.push({ medicineName: tokenRegex })
+            conditions.push({ usageSummary: tokenRegex })
+            conditions.push({ usage: tokenRegex })
+            conditions.push({ description: tokenRegex })
+            conditions.push({ activeIngredient: tokenRegex })
+            conditions.push({ ingredients: tokenRegex })
+            conditions.push({ mainIngredients: tokenRegex })
+        }
+    }
+
+    if (conditions.length === 0) {
+        return []
+    }
+
+    return Product.find({
+        isActive: true,
+        $or: conditions,
+    })
+        .select(PRODUCT_DETAIL_FIELDS)
+        .sort({ updatedAt: -1 })
+        .limit(40)
+        .lean()
+}
+
+const mergeProductsById = (...groups) => {
+    const byId = new Map()
+    for (const group of groups) {
+        if (!Array.isArray(group)) {
+            continue
+        }
+        for (const item of group) {
+            const id = String(item?._id || item?.id || '')
+            if (!id || byId.has(id)) {
+                continue
+            }
+            byId.set(id, item)
+        }
+    }
+    return Array.from(byId.values())
+}
+
+const searchProductsForConsultation = async ({ message, symptomKeyword }) => {
+    let aiDocs = []
+    let aiPlan = null
+
+    try {
+        aiPlan = await buildReadOnlyQueryPlanWithOllama({ message, symptomKeyword })
+        aiDocs = await executeReadOnlyProductQueryPlan(aiPlan)
+    } catch {
+        aiDocs = []
+    }
+
+    const localDocs = await searchProductsByLocalRules({ message, symptomKeyword })
+    let merged = mergeProductsById(aiDocs, localDocs)
+
+    if (merged.length < 4) {
+        const recentDocs = await Product.find({ isActive: true })
+            .select(PRODUCT_DETAIL_FIELDS)
+            .sort({ updatedAt: -1 })
+            .limit(40)
+            .lean()
+
+        merged = mergeProductsById(merged, recentDocs)
+    }
+
+    return {
+        plan: aiPlan,
+        products: merged.slice(0, 40).map(toProductCard),
+    }
+}
+
+const classifyMessageFallback = (message) => {
+    const normalized = normalizeText(message)
+    const symptomKeyword = extractSymptomKeyword(message)
+    const hasSocial = SOCIAL_HINT_REGEX.test(normalized)
+    const hasConsult = PRODUCT_HINT_REGEX.test(normalized) || Boolean(symptomKeyword)
+    const wantsHuman = HUMAN_HINT_REGEX.test(normalized)
+
+    if (hasSocial && !hasConsult && !wantsHuman) {
+        return {
+            type: 'social',
+            symptomKeyword: '',
+            reply: 'Chao mung ban den voi nha thuoc T&Q. Neu can tu van suc khoe, minh luon san sang ho tro.',
+            needsHuman: false,
+        }
+    }
+
+    return {
+        type: 'consult',
+        symptomKeyword,
+        reply: '',
+        needsHuman: wantsHuman,
+    }
+}
+
+const classifyClientMessage = async ({ message, history = [] }) => {
+    const fallback = classifyMessageFallback(message)
+
+    const compactHistory = history
+        .slice(-6)
+        .map((item) => `${item.senderType}: ${String(item.content || '').slice(0, 160)}`)
+        .join('\n')
+
+    const systemPrompt = [
+        'Ban la AI phan loai tin nhan cho nha thuoc.',
+        'Chi tra ve JSON hop le, khong markdown.',
+        'Schema:',
+        '{"type":"social|consult","symptomKeyword":"string","reply":"string","needsHuman":true|false}',
+        'Neu la social: reply la loi chao ngan gon.',
+        'Neu la consult: symptomKeyword la trieu chung neu co, reply de rong.',
+    ].join(' ')
+
+    const prompt = [
+        `History:\n${compactHistory || '(empty)'}`,
+        `User message: "${String(message || '').trim()}"`,
+        'Return JSON only.',
+    ].join('\n\n')
+
+    try {
+        const raw = await callOllama({
+            prompt,
+            system: systemPrompt,
+            temperature: 0,
+            format: 'json',
+        })
+        const parsed = parseOllamaJson(raw, {})
+
+        const type = String(parsed.type || '').trim().toLowerCase()
+        const normalizedType = type === 'social' ? 'social' : type === 'consult' ? 'consult' : fallback.type
+        const symptomKeyword = String(parsed.symptomKeyword || fallback.symptomKeyword || '').trim()
+        const reply = String(parsed.reply || '').trim()
+        const needsHuman = Boolean(parsed.needsHuman) || fallback.needsHuman
+
+        if (normalizedType === 'social') {
+            return {
+                type: 'social',
+                symptomKeyword: '',
+                reply:
+                    reply ||
+                    'Chao mung ban den voi nha thuoc T&Q. Neu can tu van suc khoe, minh luon san sang ho tro.',
+                needsHuman,
+            }
+        }
+
+        return {
+            type: 'consult',
+            symptomKeyword: symptomKeyword || fallback.symptomKeyword,
+            reply: '',
+            needsHuman,
+        }
+    } catch {
+        return fallback
+    }
+}
+
+const generateConsultReply = async ({ message, symptomKeyword, products }) => {
+    if (!Array.isArray(products) || products.length === 0) {
+        return 'Khong tim thay san pham phu hop'
+    }
+
+    const summary = products
+        .slice(0, 4)
+        .map((item, index) => `${index + 1}. ${item.productName} - ${Math.round(Number(item.price || 0)).toLocaleString('vi-VN')} VND`)
+        .join('\n')
+
+    const systemPrompt = [
+        'Ban la duoc si AI than thien cua nha thuoc T&Q.',
+        'Tra loi tieng Viet, ngan gon, thuc te, khong chan doan benh.',
+        'Can dua loi khuyen co ban va gioi thieu san pham phu hop.',
+        'Khong duoc che them thong tin ngoai du lieu da co.',
+    ].join(' ')
+
+    const prompt = [
+        `Cau hoi cua khach: "${String(message || '').trim()}"`,
+        `Trieu chung chinh: "${String(symptomKeyword || '').trim() || 'khong ro'}"`,
+        `Danh sach san pham de goi y:\n${summary}`,
+        'Hay viet 1 doan tra loi than thien, ket bang cau moi nguoi dung xem cac the san pham ben duoi.',
+    ].join('\n\n')
+
+    try {
+        const text = await callOllama({
+            prompt,
+            system: systemPrompt,
+            temperature: 0.4,
+        })
+        const cleaned = String(text || '').trim()
+        if (cleaned) {
+            return cleaned
+        }
+    } catch {
+        // fallback below
+    }
+
+    if (symptomKeyword) {
+        return `Ban dang gap trieu chung ${symptomKeyword}. Minh da chon mot so san pham phu hop de ban tham khao ben duoi.`
+    }
+
+    return 'Minh da tim thay mot so san pham phu hop de ban tham khao ben duoi.'
+}
+
+const extractOrderCode = (text) => {
+    const match = String(text || '').toUpperCase().match(/ORD[0-9]{8,}/)
+    return match ? match[0] : ''
 }
 
 const searchOrdersForUser = async ({ clientId, query }) => {
-	const filter = { userId: clientId }
-	const orderCode = extractOrderCode(query)
+    const filter = { userId: clientId }
+    const orderCode = extractOrderCode(query)
 
-	if (orderCode) {
-		filter.orderCode = new RegExp(`^${escapeRegex(orderCode)}$`, 'i')
-	}
+    if (orderCode) {
+        filter.orderCode = new RegExp(`^${escapeRegex(orderCode)}$`, 'i')
+    }
 
-	const docs = await Order.find(filter)
-		.select('orderCode status paymentStatus totalAmount placedAt items')
-		.sort({ placedAt: -1 })
-		.limit(orderCode ? 1 : 3)
-		.lean()
+    const docs = await Order.find(filter)
+        .select('orderCode status paymentStatus totalAmount placedAt items')
+        .sort({ placedAt: -1 })
+        .limit(orderCode ? 1 : 3)
+        .lean()
 
-	return docs.map((item) => ({
-		id: String(item._id),
-		orderCode: item.orderCode,
-		status: item.status,
-		paymentStatus: item.paymentStatus,
-		totalAmount: Number(item.totalAmount || 0),
-		placedAt: item.placedAt,
-		items: (item.items || []).slice(0, 3).map((line) => ({
-			productName: line.productName,
-			quantity: line.quantity,
-			unitPrice: line.unitPrice,
-		})),
-	}))
-}
-
-const summarizeForPrompt = (payload) => {
-	try {
-		const text = JSON.stringify(payload)
-		return text.length > 4000 ? text.slice(0, 4000) : text
-	} catch {
-		return 'NO_DATA'
-	}
-}
-
-const fallbackReplyByAction = (action, { isHumanPending = false } = {}) => {
-	if (action === INTENTS.QUERY_PRODUCT || action === INTENTS.FIND_PRODUCT) {
-		return 'Mình chua tim thay dung san pham ban can. Ban co the gui ten thuoc, hoat chat hoac yeu cau gap nhan vien de duoc tu van ky hon.'
-	}
-
-	if (action === INTENTS.CALL_HUMAN || action === INTENTS.CALL_ADMIN) {
-		return 'Mình da ghi nhan yeu cau gap nhan vien. Ban vui long doi trong giay lat.'
-	}
-
-	if (isHumanPending) {
-		return 'Mình van dang ho tro ban trong luc ket noi nhan vien. Ban co the mo ta them trieu chung hoac ten thuoc can tim de minh tra cuu nhanh.'
-	}
-
-	return 'Mình da nhan duoc tin nhan cua ban. Ban co the mo ta cu the hon de minh tu van chinh xac ngay bay gio.'
-}
-
-const buildDataDrivenFallbackReply = ({ action, dataPayload = {}, queryText = '' }) => {
-	const products = Array.isArray(dataPayload.products) ? dataPayload.products : []
-	if (products.length > 0 && (action === INTENTS.FIND_PRODUCT || action === INTENTS.QUERY_PRODUCT)) {
-		const lines = products.slice(0, 3).map((item, index) => {
-			const stockText = Number(item.totalStock || 0) > 0 ? `con ${Number(item.totalStock || 0)}` : 'tam het hang'
-			return `${index + 1}. ${item.productName || 'San pham'} - ${formatCurrencyVnd(item.price)} (${stockText})`
-		})
-
-		return ['Mình tim thay mot so san pham phu hop:', ...lines, 'Ban can minh goi y them theo trieu chung khong?'].join('\n')
-	}
-
-	const orders = Array.isArray(dataPayload.orders) ? dataPayload.orders : []
-	if (orders.length > 0) {
-		const lines = orders.slice(0, 3).map((item, index) => {
-			const code = item.orderCode || 'N/A'
-			const status = item.status || 'unknown'
-			const payment = item.paymentStatus || 'unknown'
-			const total = formatCurrencyVnd(item.totalAmount)
-			return `${index + 1}. ${code} - Trang thai: ${status}, Thanh toan: ${payment}, Tong: ${total}`
-		})
-
-		return ['Mình da tim thay thong tin don hang gan day cua ban:', ...lines, 'Ban can kiem tra don nao chi tiet hon khong?'].join('\n')
-	}
-
-	if (ORDER_LOOKUP_HINT_REGEX.test(normalizeText(queryText)) || extractOrderCode(queryText)) {
-		return 'Mình chua tim thay don hang phu hop voi thong tin ban cung cap. Ban vui long gui ma don dang ORD... de minh kiem tra chinh xac hon.'
-	}
-
-	return ''
+    return docs.map((item) => ({
+        id: String(item._id),
+        orderCode: item.orderCode,
+        status: item.status,
+        paymentStatus: item.paymentStatus,
+        totalAmount: Number(item.totalAmount || 0),
+        placedAt: item.placedAt,
+        items: (item.items || []).slice(0, 3).map((line) => ({
+            productName: line.productName,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+        })),
+    }))
 }
 
 const handleClientMessage = async ({ clientId, clientName = '', conversationId, content }) => {
-	ensureObjectId(clientId, 'clientId')
+    ensureObjectId(clientId, 'clientId')
 
-	let conversation = null
-	if (conversationId) {
-		ensureObjectId(conversationId, 'conversationId')
-		conversation = await ChatConversation.findOne({ _id: conversationId, clientId })
-			.populate('clientId', 'fullName email phone role')
-			.populate('assignedStaffId', 'fullName email phone role')
-	}
+    const normalizedContent = String(content || '').trim()
+    if (!normalizedContent) {
+        throw new ChatServiceError('Message content is required', 400)
+    }
 
-	if (!conversation) {
-		conversation = await findOrCreateActiveConversation(clientId)
-	}
+    // Always use a virtual conversation
+    const conversation = await findOrCreateActiveConversation(clientId)
 
-	if (conversation.status === 'closed') {
-		conversation = await touchConversation(conversation._id, {
-			status: 'ai',
-			assignedStaffId: null,
-			lastAction: 'REOPENED_BY_CLIENT',
-		})
-	}
+    const userMessage = await appendMessage({
+        conversationId: conversation._id,
+        senderType: 'user',
+        senderId: clientId,
+        senderName: String(clientName || '').trim(),
+        content: normalizedContent,
+        intent: INTENTS.CHAT,
+        action: INTENTS.CHAT,
+    })
 
-	let hydratedConversation = await ChatConversation.findById(conversation._id)
-		.populate('clientId', 'fullName email phone role')
-		.populate('assignedStaffId', 'fullName email phone role')
-	const isHumanPending = hydratedConversation.status === 'human_pending'
-	const isHumanConversation = hydratedConversation.status === 'human'
+    const userMessagePayload = serializeMessage(userMessage)
 
-	const userMessagePayload = isHumanConversation
-		? serializeMessage(
-				await appendMessage({
-					conversationId: conversation._id,
-					senderType: 'user',
-					senderId: clientId,
-					senderName: String(clientName || '').trim(),
-					content,
-				}),
-			)
-		: createTransientMessage({
-				conversationId: conversation._id,
-				senderType: 'user',
-				senderId: clientId,
-				senderName: String(clientName || '').trim(),
-				content,
-			})
+    // Stateless classification (history is empty)
+    const classification = await classifyClientMessage({
+        message: normalizedContent,
+        history: [],
+    })
 
-	if (isHumanConversation) {
-		return {
-			conversation: serializeConversation(hydratedConversation),
-			userMessage: userMessagePayload,
-			botMessage: null,
-			systemMessage: null,
-			requiresHuman: false,
-			action: 'HUMAN_CHAT',
-		}
-	}
+    if (classification.needsHuman) {
+        const humanFlow = await requestHumanFromClient(clientId, conversation._id, 'user_requested_human')
 
-	let intentResult = {
-		action: INTENTS.CHAT,
-		intent: INTENTS.GENERAL_FAQ,
-		confidence: 0,
-		keyword: '',
-		query: '',
-		message: '',
-		reason: '',
-	}
+        const botDoc = await appendMessage({
+            conversationId: conversation._id,
+            senderType: 'bot',
+            content: 'Minh da chuyen yeu cau sang nhan vien. Trong luc cho, minh van co the goi y san pham cho ban.',
+            intent: INTENTS.CALL_HUMAN,
+            action: INTENTS.CALL_HUMAN,
+            meta: {
+                responseCategory: 'handoff',
+            },
+        })
 
-	try {
-		const history = await ChatMessage.find({ conversationId: conversation._id })
-			.sort({ createdAt: -1 })
-			.limit(8)
-			.lean()
+        return {
+            conversation: humanFlow.conversation,
+            userMessage: userMessagePayload,
+            botMessage: serializeMessage(botDoc),
+            systemMessage: humanFlow.systemMessage,
+            requiresHuman: true,
+            action: INTENTS.CALL_HUMAN,
+        }
+    }
 
-		intentResult = await classifyIntent({
-			message: content,
-			history: history.reverse().map((item) => ({
-				senderType: item.senderType,
-				content: item.content,
-			})),
-		})
-	} catch {
-		intentResult = {
-			action: INTENTS.CHAT,
-			intent: INTENTS.GENERAL_FAQ,
-			confidence: 0,
-			keyword: '',
-			query: '',
-			message: '',
-			reason: 'classification_failed',
-		}
-	}
+    if (classification.type === 'social') {
+        const botDoc = await appendMessage({
+            conversationId: conversation._id,
+            senderType: 'bot',
+            content: classification.reply,
+            intent: INTENTS.SOCIAL_CHAT,
+            action: INTENTS.CHAT,
+            meta: {
+                responseCategory: 'social_chat',
+            },
+        })
 
-	const symptomKeyword = extractSymptomKeyword(content)
-	const hasSymptomHint = SYMPTOM_QUERY_HINT_REGEX.test(normalizeText(content))
-	if (symptomKeyword) {
-		const productMatches = await searchProductsBySymptom(
-			buildSymptomSearchQueries({
-				content,
-				symptomKeyword,
-				intentResult,
-			}),
-		)
-		const botReply = formatProductSuggestionText(productMatches)
+        return {
+            conversation: serializeConversation(conversation),
+            userMessage: userMessagePayload,
+            botMessage: serializeMessage(botDoc),
+            systemMessage: null,
+            requiresHuman: false,
+            action: INTENTS.CHAT,
+        }
+    }
 
-		const botPayload = createTransientMessage({
-			conversationId: conversation._id,
-			senderType: 'bot',
-			content: botReply,
-			intent: INTENTS.QUERY_PRODUCT,
-			action: INTENTS.FIND_PRODUCT,
-			meta: {
-				symptomKeyword,
-				matcher: 'usageSummary_regex_fuzzy',
-				productSuggestions: productMatches.map((item) => ({
-					id: item.id,
-					productName: item.productName,
-					imageUrl: item.imageUrl,
-					price: item.price,
-					productUrl: `http://localhost:5173/product/${item.id}`,
-				})),
-			},
-		})
+    const symptomKeyword = classification.symptomKeyword || extractSymptomKeyword(normalizedContent)
+    const { plan, products } = await searchProductsForConsultation({
+        message: normalizedContent,
+        symptomKeyword,
+    })
 
-		const nextStatus = isHumanPending ? 'human_pending' : 'ai'
-		const updatedConversation = await touchConversation(conversation._id, {
-			status: nextStatus,
-			lastIntent: INTENTS.QUERY_PRODUCT,
-			lastAction: INTENTS.FIND_PRODUCT,
-		})
+    const suggestions = pickRandomItems(products, 4)
+    const consultReply = await generateConsultReply({
+        message: normalizedContent,
+        symptomKeyword,
+        products: suggestions,
+    })
 
-		return {
-			conversation: serializeConversation(updatedConversation),
-			userMessage: userMessagePayload,
-			botMessage: botPayload,
-			systemMessage: null,
-			requiresHuman: nextStatus === 'human_pending',
-			action: INTENTS.FIND_PRODUCT,
-		}
-	}
+    const botDoc = await appendMessage({
+        conversationId: conversation._id,
+        senderType: 'bot',
+        content: consultReply,
+        intent: INTENTS.CONSULTATION,
+        action: INTENTS.FIND_PRODUCT,
+        meta: {
+            responseCategory: 'product_consultation',
+            symptomKeyword,
+            queryPlan: plan || null,
+            productSuggestions: suggestions,
+        },
+    })
 
-	if (hasSymptomHint) {
-		const productMatches = await searchProductsBySymptom(
-			buildSymptomSearchQueries({
-				content,
-				symptomKeyword: normalizeText(content),
-				intentResult,
-			}),
-		)
-		const botReply = formatProductSuggestionText(productMatches)
-
-		const botPayload = createTransientMessage({
-			conversationId: conversation._id,
-			senderType: 'bot',
-			content: botReply,
-			intent: INTENTS.QUERY_PRODUCT,
-			action: INTENTS.FIND_PRODUCT,
-			meta: {
-				symptomKeyword: normalizeText(content),
-				matcher: 'symptom_hint_usageSummary_regex_fuzzy',
-				productSuggestions: productMatches.map((item) => ({
-					id: item.id,
-					productName: item.productName,
-					imageUrl: item.imageUrl,
-					price: item.price,
-					productUrl: `http://localhost:5173/product/${item.id}`,
-				})),
-			},
-		})
-
-		const nextStatus = isHumanPending ? 'human_pending' : 'ai'
-		const updatedConversation = await touchConversation(conversation._id, {
-			status: nextStatus,
-			lastIntent: INTENTS.QUERY_PRODUCT,
-			lastAction: INTENTS.FIND_PRODUCT,
-		})
-
-		return {
-			conversation: serializeConversation(updatedConversation),
-			userMessage: userMessagePayload,
-			botMessage: botPayload,
-			systemMessage: null,
-			requiresHuman: nextStatus === 'human_pending',
-			action: INTENTS.FIND_PRODUCT,
-		}
-	}
-
-	let action = intentResult.action || intentResult.intent || INTENTS.CHAT
-	if (action === INTENTS.GENERAL_FAQ) {
-		action = INTENTS.CHAT
-	}
-
-	if (action === INTENTS.QUERY_PRODUCT) {
-		action = INTENTS.FIND_PRODUCT
-	}
-
-	if (action === INTENTS.CALL_HUMAN) {
-		action = INTENTS.CALL_ADMIN
-	}
-
-	const normalizedContent = normalizeText(content)
-	const inferredProductLookup = PRODUCT_LOOKUP_HINT_REGEX.test(normalizedContent)
-	const inferredOrderLookup =
-		ORDER_LOOKUP_HINT_REGEX.test(normalizedContent) || Boolean(extractOrderCode(content))
-
-	if (action === INTENTS.CHAT && inferredProductLookup) {
-		action = INTENTS.FIND_PRODUCT
-	}
-
-	if (action === INTENTS.CALL_ADMIN && isHumanPending) {
-		action = INTENTS.CHAT
-	}
-
-	if (action === INTENTS.CALL_ADMIN) {
-		const humanFlow = await requestHumanFromClient(clientId, conversation._id, intentResult.reason || 'low_confidence')
-		const botDoc = await appendMessage({
-			conversationId: conversation._id,
-			senderType: 'bot',
-			content: 'Mình da chuyen cuoc tro chuyen sang nhan vien. Trong luc cho, ban van co the tiep tuc dat cau hoi de minh ho tro nhanh.',
-			intent: intentResult.intent || INTENTS.CALL_HUMAN,
-			action,
-			meta: {
-				confidence: intentResult.confidence,
-				reason: intentResult.reason,
-			},
-		})
-
-		return {
-			conversation: humanFlow.conversation,
-			userMessage: userMessagePayload,
-			botMessage: serializeMessage(botDoc),
-			systemMessage: humanFlow.systemMessage,
-			requiresHuman: true,
-			action,
-		}
-	}
-
-	let dataPayload = {}
-	if (action === INTENTS.FIND_PRODUCT || action === INTENTS.QUERY_PRODUCT) {
-		dataPayload = {
-			...dataPayload,
-			products: await searchProducts(intentResult.keyword || intentResult.query || content),
-		}
-	}
-
-	if (inferredOrderLookup) {
-		dataPayload = {
-			...dataPayload,
-			orders: await searchOrdersForUser({
-				clientId,
-				query: intentResult.keyword || intentResult.query || content,
-			}),
-		}
-	}
-
-	const contextNoteParts = ['This is a pharmacy customer support chat.']
-	if (isHumanPending) {
-		contextNoteParts.push('A staff handoff is pending. Keep helping the customer while they wait.')
-	}
-	if (Array.isArray(dataPayload.products) && dataPayload.products.length > 0) {
-		contextNoteParts.push('Product search data is included in Data.')
-	}
-	if (Array.isArray(dataPayload.orders) && dataPayload.orders.length > 0) {
-		contextNoteParts.push('Order lookup data is included in Data.')
-	}
-
-	let botReply = ''
-	let usedFallbackReply = false
-	try {
-		if (action === INTENTS.CHAT && intentResult.message && !inferredProductLookup && !inferredOrderLookup) {
-			// Direct reply from AI classification
-			botReply = intentResult.message
-		} else if ((action === INTENTS.FIND_PRODUCT || action === INTENTS.QUERY_PRODUCT) && Array.isArray(dataPayload.products) && dataPayload.products.length > 0) {
-			// Phase 2: Format product data + generate structured reply
-			botReply = await generatePhase2Reply({
-				userMessage: content,
-				products: dataPayload.products,
-				contextNote: contextNoteParts.join(' '),
-			})
-		} else {
-			// Fallback to general data-driven generation
-			botReply = await generateReplyFromData({
-				userMessage: content,
-				intent: intentResult.intent,
-				action,
-				dataSummary: summarizeForPrompt(dataPayload),
-				contextNote: contextNoteParts.join(' '),
-			})
-		}
-	} catch {
-		usedFallbackReply = true
-		botReply =
-			buildDataDrivenFallbackReply({ action, dataPayload, queryText: content }) ||
-			fallbackReplyByAction(action, { isHumanPending })
-	}
-
-	if (!botReply) {
-		usedFallbackReply = true
-		botReply =
-			buildDataDrivenFallbackReply({ action, dataPayload, queryText: content }) ||
-			fallbackReplyByAction(action, { isHumanPending })
-	}
-
-	if (isHumanPending && usedFallbackReply && action !== INTENTS.CALL_ADMIN && !/^Nhan vien dang duoc ket noi\./i.test(botReply)) {
-		botReply = `Nhan vien dang duoc ket noi. ${botReply}`
-	}
-
-	const botPayload = createTransientMessage({
-		conversationId: conversation._id,
-		senderType: 'bot',
-		content: botReply,
-		intent: intentResult.intent || INTENTS.CHAT,
-		action,
-		meta: {
-			confidence: intentResult.confidence,
-			keyword: intentResult.keyword || intentResult.query,
-			query: intentResult.query,
-			reason: intentResult.reason,
-		},
-	})
-
-	const nextStatus = isHumanPending ? 'human_pending' : 'ai'
-
-	const updatedConversation = await touchConversation(conversation._id, {
-		status: nextStatus,
-		lastIntent: intentResult.intent || INTENTS.CHAT,
-		lastAction: action,
-	})
-
-	return {
-		conversation: serializeConversation(updatedConversation),
-		userMessage: userMessagePayload,
-		botMessage: botPayload,
-		systemMessage: null,
-		requiresHuman: nextStatus === 'human_pending',
-		action,
-	}
+    return {
+        conversation: serializeConversation(conversation),
+        userMessage: userMessagePayload,
+        botMessage: serializeMessage(botDoc),
+        systemMessage: null,
+        requiresHuman: false,
+        action: INTENTS.FIND_PRODUCT,
+    }
 }
 
 const handleStaffMessage = async ({ staffId, staffName = '', conversationId, content }) => {
-	const { conversation } = await ensureStaffCanAccessConversation(staffId, conversationId)
+    const { staff, conversation } = await ensureStaffCanAccessConversation(staffId, conversationId)
 
-	if (conversation.status !== 'human') {
-		await touchConversation(conversation._id, {
-			status: 'human',
-			assignedStaffId: staffId,
-			lastAction: 'HUMAN_CHAT',
-		})
-	}
+    const adminMessage = await appendMessage({
+        conversationId: conversation._id,
+        senderType: 'admin',
+        senderId: staffId,
+        senderName: String(staffName || '').trim(),
+        content,
+        action: 'HUMAN_CHAT',
+    })
 
-	const adminMessage = await appendMessage({
-		conversationId: conversation._id,
-		senderType: 'admin',
-		senderId: staffId,
-		senderName: String(staffName || '').trim(),
-		content,
-		action: 'HUMAN_CHAT',
-	})
-
-	const updatedConversation = await ChatConversation.findById(conversation._id)
-		.populate('clientId', 'fullName email phone role')
-		.populate('assignedStaffId', 'fullName email phone role')
-
-	return {
-		conversation: serializeConversation(updatedConversation),
-		message: serializeMessage(adminMessage),
-	}
+    return {
+        conversation: serializeConversation(conversation),
+        message: serializeMessage(adminMessage),
+    }
 }
 
 module.exports = {
-	ChatServiceError,
-	SUPPORT_ROLES,
-	serializeConversation,
-	serializeMessage,
-	getClientConversationSnapshot,
-	getClientMessages,
-	requestHumanFromClient,
-	assignConversationToStaff,
-	closeConversationByStaff,
-	listConversationsForAdmin,
-	getConversationMessagesForAdmin,
-	handleClientMessage,
-	handleStaffMessage,
+    ChatServiceError,
+    SUPPORT_ROLES,
+    INTENTS,
+    serializeConversation,
+    serializeMessage,
+    getClientConversationSnapshot,
+    getClientMessages,
+    requestHumanFromClient,
+    assignConversationToStaff,
+    closeConversationByStaff,
+    listConversationsForAdmin,
+    getConversationMessagesForAdmin,
+    handleClientMessage,
+    handleStaffMessage,
+    searchOrdersForUser,
 }

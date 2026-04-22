@@ -180,7 +180,41 @@ const sendMessage = async (req, res) => {
 	}
 }
 
-const handleChatWithAI = sendMessage
+const handleChatWithAI = async (req, res) => {
+	try {
+		if (req.user?.userId) {
+			return sendMessage(req, res)
+		}
+
+		const { message } = req.body || {}
+		const content = String(message || '').trim()
+
+		if (!content) {
+			return res.status(400).json({
+				success: false,
+				message: 'message is required',
+				error: 'message is required',
+			})
+		}
+
+		const data = await chatService.handleGuestAiMessage({
+			content,
+			guestName: 'Khach vang lai',
+		})
+
+		return res.status(200).json({
+			success: true,
+			message: 'Guest AI chat processed successfully',
+			data,
+		})
+	} catch (error) {
+		return res.status(error.statusCode || 500).json({
+			success: false,
+			message: error.message || 'AI chat failed',
+			error: error.message,
+		})
+	}
+}
 
 module.exports = {
 	getMyConversation,

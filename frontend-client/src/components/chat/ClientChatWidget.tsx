@@ -132,12 +132,22 @@ const parseProductSuggestions = (message: ChatMessage): ChatProductSuggestion[] 
 	return parsedItems.filter((item): item is ChatProductSuggestion => item !== null)
 }
 
-const openProductDetailFromChat = (productId: string) => {
-	if (!productId) {
+const openProductDetailFromChat = (productId: string, productUrl?: string) => {
+	if (!productId && !productUrl) {
 		return
 	}
 
-	window.history.pushState({}, '', `/product/${encodeURIComponent(productId)}`)
+	let nextPath = `/product/${encodeURIComponent(productId)}`
+	if (productUrl && productUrl.trim()) {
+		try {
+			const parsed = new URL(productUrl, window.location.origin)
+			nextPath = `${parsed.pathname}${parsed.search}${parsed.hash}`
+		} catch {
+			nextPath = productUrl
+		}
+	}
+
+	window.history.pushState({}, '', nextPath)
 	window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
@@ -502,47 +512,47 @@ export default function ClientChatWidget({ socket, isOpen, onClose }: ClientChat
 											{(() => {
 												const productSuggestions = parseProductSuggestions(message)
 												return (
-											<div
-												className={`max-w-[82%] rounded-2xl px-3 py-2 shadow-sm ${
-													isUser
-														? 'bg-blue-600 text-white'
-														: isAdmin
-															? 'bg-green-600 text-white'
-															: 'bg-white text-gray-800'
-												}`}
-											>
-												<p className="text-sm leading-5">{message.content}</p>
-												{productSuggestions.length > 0 && (
-													<div className="mt-3 grid gap-2">
-														{productSuggestions.map((product) => (
-															<button
-																type="button"
-																key={`${message.id}_${product.id}`}
-																onClick={() => openProductDetailFromChat(product.id)}
-																className="flex items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/70 p-2 text-left transition hover:border-blue-300 hover:bg-blue-100/70"
-															>
-																{product.imageUrl ? (
-																	<img src={product.imageUrl} alt={product.productName} className="h-14 w-14 rounded-lg object-cover" />
-																) : (
-																	<div className="h-14 w-14 rounded-lg bg-gradient-to-br from-slate-100 to-slate-200" />
-																)}
-																<div className="min-w-0">
-																	<p className="line-clamp-2 text-xs font-semibold text-slate-800">{product.productName}</p>
-																	{product.price !== undefined && (
-																		<p className="mt-1 text-xs font-medium text-rose-600">{toCurrencyVnd(product.price)}</p>
-																	)}
-																</div>
-															</button>
-														))}
+													<div
+														className={`max-w-[82%] rounded-2xl px-3 py-2 shadow-sm ${isUser
+															? 'bg-blue-600 text-white'
+															: isAdmin
+																? 'bg-green-600 text-white'
+																: 'bg-white text-gray-800'
+															}`}
+													>
+														<p className="text-sm leading-5">{message.content}</p>
+														{productSuggestions.length > 0 && (
+															<div className="mt-3 grid gap-2.5">
+																{productSuggestions.map((product) => (
+																	<button
+																		type="button"
+																		key={`${message.id}_${product.id}`}
+																		onClick={() => openProductDetailFromChat(product.id, product.productUrl)}
+																		className="group flex items-center gap-3 rounded-xl border border-sky-200 bg-gradient-to-r from-sky-50 to-cyan-50 p-2.5 text-left transition hover:border-sky-400 hover:from-sky-100 hover:to-cyan-100"
+																	>
+																		{product.imageUrl ? (
+																			<img src={product.imageUrl} alt={product.productName} className="h-16 w-16 rounded-lg border border-sky-100 object-cover" />
+																		) : (
+																			<div className="h-16 w-16 rounded-lg border border-sky-100 bg-gradient-to-br from-slate-100 to-slate-200" />
+																		)}
+																		<div className="min-w-0 flex-1">
+																			<p className="line-clamp-2 text-sm font-semibold text-slate-900">{product.productName}</p>
+																			{product.price !== undefined && (
+																				<p className="mt-1 text-xs font-bold text-rose-600">{toCurrencyVnd(product.price)}</p>
+																			)}
+																			<p className="mt-1 text-[11px] font-medium text-sky-700 group-hover:text-sky-800">Xem chi tiet san pham</p>
+																		</div>
+																	</button>
+																))}
+															</div>
+														)}
+														<div className={`mt-1 flex items-center gap-1 text-[10px] ${isUser || isAdmin ? 'text-white/80' : 'text-gray-500'}`}>
+															{isUser ? <UserRound className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
+															<span>{message.senderName || (isAdmin ? 'Nhan vien' : 'Tro ly')}</span>
+															<span>•</span>
+															<span>{formatTime(message.createdAt)}</span>
+														</div>
 													</div>
-												)}
-												<div className={`mt-1 flex items-center gap-1 text-[10px] ${isUser || isAdmin ? 'text-white/80' : 'text-gray-500'}`}>
-													{isUser ? <UserRound className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
-													<span>{message.senderName || (isAdmin ? 'Nhan vien' : 'Tro ly')}</span>
-													<span>•</span>
-													<span>{formatTime(message.createdAt)}</span>
-												</div>
-											</div>
 												)
 											})()}
 										</div>
