@@ -6,51 +6,58 @@ interface CartPageProps {
 	onBackHome?: () => void
 }
 
-const formatVnd = (value: number) => `${new Intl.NumberFormat('vi-VN').format(Math.max(0, Math.round(value)))}đ`
+const formatVnd = (value: number) => {
+	if (typeof value !== 'number' || Number.isNaN(value)) {
+		return '0đ'
+	}
+	return `${new Intl.NumberFormat('vi-VN').format(Math.max(0, Math.round(value)))}đ`
+}
+
 const CHECKOUT_SELECTED_IDS_KEY = 'checkout:selectedProductIds'
 
 function CartPage({ onBackHome }: CartPageProps) {
 	const { cart, error, isLoading, updateItem, removeItem, clearAllItems } = useCart()
 	const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
 
-	const invalidQuantityItems = cart.items.filter((item) => item.quantity <= 0)
-	const invalidPriceItems = cart.items.filter((item) => item.unitPrice <= 0)
+	const items = useMemo(() => (cart?.items || []).filter(item => item && item.productId), [cart?.items])
+	const invalidQuantityItems = useMemo(() => items.filter((item) => item.quantity <= 0), [items])
+	const invalidPriceItems = useMemo(() => items.filter((item) => item.unitPrice <= 0), [items])
 	const hasInvalidItems = invalidQuantityItems.length > 0 || invalidPriceItems.length > 0
 
 	useEffect(() => {
 		setSelectedProductIds((currentIds) => {
-			const cartProductIdSet = new Set(cart.items.map((item) => item.productId))
+			const cartProductIdSet = new Set(items.map((item) => item.productId))
 			const keptIds = currentIds.filter((id) => cartProductIdSet.has(id))
 
 			if (keptIds.length > 0) {
 				return keptIds
 			}
 
-			return cart.items.map((item) => item.productId)
+			return items.map((item) => item.productId)
 		})
-	}, [cart.items])
+	}, [items])
 
 	const selectedItems = useMemo(
-		() => cart.items.filter((item) => selectedProductIds.includes(item.productId)),
-		[cart.items, selectedProductIds],
+		() => items.filter((item) => selectedProductIds.includes(item.productId)),
+		[items, selectedProductIds],
 	)
 
 	const selectedTotalQuantity = useMemo(
-		() => selectedItems.reduce((sum, item) => sum + item.quantity, 0),
+		() => selectedItems.reduce((sum, item) => sum + (item.quantity || 0), 0),
 		[selectedItems],
 	)
 
 	const selectedTotalAmount = useMemo(
-		() => selectedItems.reduce((sum, item) => sum + item.lineTotal, 0),
+		() => selectedItems.reduce((sum, item) => sum + (item.lineTotal || 0), 0),
 		[selectedItems],
 	)
 
 	const hasSelectedItems = selectedItems.length > 0
 	const canCheckout = hasSelectedItems && selectedTotalAmount > 0 && !hasInvalidItems
-	const allSelected = cart.items.length > 0 && selectedProductIds.length === cart.items.length
+	const allSelected = items.length > 0 && selectedProductIds.length === items.length
 
 	const checkoutReason = (() => {
-		if (cart.items.length === 0) {
+		if (items.length === 0) {
 			return 'Giỏ hàng đang trống'
 		}
 
@@ -103,7 +110,7 @@ function CartPage({ onBackHome }: CartPageProps) {
 			return
 		}
 
-		setSelectedProductIds(cart.items.map((item) => item.productId))
+		setSelectedProductIds(items.map((item) => item.productId))
 	}
 
 	const handleCheckout = () => {
@@ -139,7 +146,7 @@ function CartPage({ onBackHome }: CartPageProps) {
 					</div>
 				</div>
 
-				{cart.items.length > 0 && (
+				{items.length > 0 && (
 					<label className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700">
 						<input type="checkbox" checked={allSelected} onChange={handleToggleSelectAll} />
 						<span>Chọn tất cả sản phẩm</span>
@@ -159,18 +166,18 @@ function CartPage({ onBackHome }: CartPageProps) {
 				</section>
 			)}
 
-			{!isLoading && !error && cart.items.length === 0 && (
+			{!isLoading && !error && items.length === 0 && (
 				<section className="rounded-2xl bg-white p-4 shadow-sm">
 					<p className="text-sm text-slate-600">Giỏ hàng của bạn đang trống.</p>
 				</section>
 			)}
 
-			{!isLoading && !error && cart.items.length > 0 && (
+			{!isLoading && !error && items.length > 0 && (
 				<div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
 					<section className="rounded-2xl bg-white p-4 shadow-sm">
 						<div className="space-y-3">
-							{cart.items.map((item) => {
-								const itemValid = item.quantity > 0 && item.unitPrice > 0
+							{items.map((item) => {
+								const itemValid = (item.quantity || 0) > 0 && (item.unitPrice || 0) > 0
 								const isSelected = selectedProductIds.includes(item.productId)
 
 								return (

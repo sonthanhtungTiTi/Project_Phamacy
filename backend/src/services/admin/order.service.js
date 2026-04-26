@@ -157,9 +157,68 @@ const updateOrderStatus = async (orderId, { status, paymentStatus, adminNote } =
 	return serializeOrder(order)
 }
 
+const updateOrderPaymentStatus = async (orderId, { paymentStatus, adminNote, cancelReason } = {}) => {
+	if (!mongoose.Types.ObjectId.isValid(orderId)) {
+		throw new AdminOrderServiceError('orderId is invalid', 400)
+	}
+
+	const allowedPaymentStatus = ['pending', 'paid', 'failed']
+	if (!allowedPaymentStatus.includes(paymentStatus)) {
+		throw new AdminOrderServiceError('paymentStatus is invalid', 400)
+	}
+
+	const transitions = {
+		unpaid: new Set(['pending', 'paid', 'failed']),
+		pending: new Set(['paid', 'failed']),
+		paid: new Set(),
+		failed: new Set(),
+		refunded: new Set(),
+	}
+
+	const order = await Order.findById(orderId).populate('userId', 'fullName email phone')
+	if (!order) {
+		throw new AdminOrderServiceError('Order not found', 404)
+	}
+
+	const currentPaymentStatus = String(order.paymentStatus)
+	if (paymentStatus !== currentPaymentStatus) {
+		const allowedNext = transitions[currentPaymentStatus] || new Set()
+		if (!allowedNext.has(paymentStatus)) {
+			throw new AdminOrderServiceError(
+				`Cannot change paymentStatus from ${currentPaymentStatus} to ${paymentStatus}`,
+				400,
+			)
+		}
+	}
+
+	order.paymentStatus = paymentStatus
+
+	if (paymentStatus === 'paid') {
+		order.paymentDate = new Date()
+	}
+
+	if (paymentStatus === 'failed') {
+		order.status = 'cancelled'
+		if (typeof cancelReason === 'string' && cancelReason.trim()) {
+			order.cancelReason = cancelReason.trim()
+		} else if (!order.cancelReason) {
+			order.cancelReason = 'Thanh toan that bai'
+		}
+	}
+
+	if (typeof adminNote === 'string') {
+		order.adminNote = adminNote.trim()
+	}
+
+	await order.save()
+
+	return serializeOrder(order)
+}
+
 module.exports = {
 	AdminOrderServiceError,
 	listOrders,
 	getOrderDetail,
 	updateOrderStatus,
+	updateOrderPaymentStatus,
 }

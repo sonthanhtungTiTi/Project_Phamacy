@@ -7,13 +7,13 @@ import { getProducts, type ProductItem } from '../services/product.service'
 import { getHealthNews, type HealthNewsBlock } from '../services/healthNews.service'
 
 const quickActions = [
-	{ label: 'Mua thuốc, tư vấn', icon: 'RX', openConsultPage: true },
-	{ label: 'Tủ thuốc gia đình', icon: 'GD' },
-	{ label: 'Tra cứu chính hãng', icon: 'CH' },
-	{ label: 'Đơn hàng của tôi', icon: 'DH' },
-	{ label: 'Đặt lịch khám bệnh', icon: 'LK' },
-	{ label: 'Kiểm tra sức khỏe', icon: 'SK' },
-	{ label: 'Đối tác nhà thuốc', icon: 'DT' },
+	{ label: 'Mua thuốc, tư vấn', icon: 'RX', path: '/mua-thuoc-tu-van' },
+	{ label: 'Tủ thuốc gia đình', icon: 'GD', path: '/tu-thuoc-gia-dinh' },
+	{ label: 'Tra cứu chính hãng', icon: 'CH', path: '/tra-cuu-chinh-hang' },
+	{ label: 'Đơn hàng của tôi', icon: 'DH', path: '/don-hang' },
+	{ label: 'Đặt lịch khám bệnh', icon: 'LK', path: '/dat-lich-kham' },
+	{ label: 'Kiểm tra sức khỏe', icon: 'SK', path: '/kiem-tra-suc-khoe' },
+	{ label: 'Đối tác nhà thuốc', icon: 'DT', path: '/doi-tac-nha-thuoc' },
 ]
 
 const heroBanners = [
@@ -108,6 +108,11 @@ function HomePage({ onOpenProductDetail, onOpenCategory, onOpenConsultPage, onOp
 		}
 
 		window.history.pushState({}, '', `/category/${encodeURIComponent(categoryId)}`)
+		window.dispatchEvent(new PopStateEvent('popstate'))
+	}
+
+	const goTo = (path: string) => {
+		window.history.pushState({}, '', path)
 		window.dispatchEvent(new PopStateEvent('popstate'))
 	}
 
@@ -254,50 +259,46 @@ function HomePage({ onOpenProductDetail, onOpenCategory, onOpenConsultPage, onOp
 				{quickActions.map((item) => (
 					<article
 						key={item.label}
-						className="rounded-xl border border-[#e6efe6] bg-[#edf5ed] p-3 text-center"
+						role="button"
+						tabIndex={0}
+						onClick={() => goTo(item.path)}
+						onKeyDown={(event) => {
+							if (event.key === 'Enter' || event.key === ' ') {
+								event.preventDefault()
+								goTo(item.path)
+							}
+						}}
+						className="group cursor-pointer rounded-xl border border-[#e6efe6] bg-[#edf5ed] p-3 text-center transition-all duration-200 hover:border-[#16a34a] hover:bg-white hover:shadow-md"
 					>
-						<div className="mx-auto mb-2 grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-[#8ce270] to-[#2eaf50] shadow-[0_6px_14px_rgba(22,163,74,0.35)]">
+						<div className="mx-auto mb-2 grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-[#8ce270] to-[#2eaf50] shadow-[0_6px_14px_rgba(22,163,74,0.35)] transition-transform group-hover:scale-110">
 							<span className="grid h-8 w-8 place-items-center rounded-full bg-white/25 text-[11px] font-bold tracking-wide leading-none text-white">
 								{item.icon}
 							</span>
 						</div>
-						{item.openConsultPage ? (
-							<p
-								role="button"
-								tabIndex={0}
-								onClick={openConsultPage}
-								onKeyDown={(event) => {
-									if (event.key === 'Enter' || event.key === ' ') {
-										event.preventDefault()
-										openConsultPage()
-									}
-								}}
-								className="text-sm font-medium text-slate-700 hover:text-[#16a34a]"
-							>
-								{item.label}
-							</p>
-						) : (
-							<p className="text-sm font-medium text-[#2f4f36]">{item.label}</p>
-						)}
+						<p className="text-sm font-medium text-slate-700 transition-colors group-hover:text-[#16a34a]">
+							{item.label}
+						</p>
 					</article>
 				))}
 			</div>
 
 			<div className="grid grid-cols-1 gap-3 rounded-2xl bg-white p-3 shadow-sm md:grid-cols-2">
 				{heroBanners.map((banner, index) => (
-					<article key={banner.image} className="relative min-h-[184px] overflow-hidden rounded-xl">
-						<a href={banner.href} className="block h-full w-full">
-							<div className={`w-full h-auto overflow-hidden relative ${index % 2 === 0 ? 'lg:pr-[8px]' : 'lg:pl-[8px]'}`}>
-								<img
-									src={banner.image}
-									alt={banner.alt}
-									loading="eager"
-									fetchPriority="high"
-									decoding="async"
-									className="min-h-[176px] w-full rounded-[12px] object-contain transition-opacity duration-300 opacity-100"
-								/>
-							</div>
-						</a>
+					<article 
+						key={banner.image} 
+						className="relative min-h-[184px] cursor-pointer overflow-hidden rounded-xl transition-transform hover:scale-[1.01]"
+						onClick={() => goTo(banner.href)}
+					>
+						<div className={`w-full h-auto overflow-hidden relative ${index % 2 === 0 ? 'lg:pr-[8px]' : 'lg:pl-[8px]'}`}>
+							<img
+								src={banner.image}
+								alt={banner.alt}
+								loading="eager"
+								fetchPriority="high"
+								decoding="async"
+								className="min-h-[176px] w-full rounded-[12px] object-contain transition-opacity duration-300 opacity-100"
+							/>
+						</div>
 					</article>
 				))}
 			</div>

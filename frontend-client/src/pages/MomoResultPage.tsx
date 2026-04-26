@@ -205,11 +205,11 @@ const MomoResultPage = () => {
 							break
 						}
 
-				if (statusResult.paymentStatus === 'failed' || orderDetails?.status === 'cancelled') {
+				if (statusResult.paymentStatus === 'failed') {
 							isSettled = true
 							shouldClearMomoOrderId = true
 							setViewStatus('failed')
-							setStatusMessage(statusResult.paymentStatus === 'failed' ? 'Thanh toán thất bại. Đơn hàng đã hủy tự động.' : 'Đơn hàng đã hủy do thanh toán thất bại.')
+							setStatusMessage('Thanh toán thất bại. Đơn hàng đã hủy tự động.')
 							break
 						}
 					} catch {
@@ -243,6 +243,10 @@ const MomoResultPage = () => {
 
 	const handleBackHome = () => {
 		window.location.href = '/'
+	}
+
+	const handleBackCart = () => {
+		window.location.href = '/gio-hang'
 	}
 
 	const handleBackOrders = () => {
@@ -467,6 +471,12 @@ const MomoResultPage = () => {
 							className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
 						>
 							Về trang chủ
+						</button>
+						<button
+							onClick={handleBackCart}
+							className="rounded-xl border border-[#35b548] bg-white px-4 py-2 text-sm font-semibold text-[#35b548] transition hover:bg-[#f0fdf4]"
+						>
+							Quay lại giỏ hàng
 						</button>
 						<button
 							onClick={handleBackOrders}

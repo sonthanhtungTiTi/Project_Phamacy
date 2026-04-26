@@ -8,6 +8,7 @@ import HealthNewsDetail from './pages/HealthNewsDetail'
 import CartPage from './pages/CartPage'
 import CheckoutPage from './pages/CheckoutPage'
 import MomoResultPage from './pages/MomoResultPage'
+import VnpayResultPage from './pages/VnpayResultPage'
 import ProfilePage from './pages/ProfilePage.tsx'
 import VideoCallOverlay from './components/calls/VideoCallComponent.tsx'
 import CallTargetSelector from './components/calls/CallTargetSelector'
@@ -15,6 +16,15 @@ import FloatingContactButton from './components/ui/FloatingContactButton'
 import ClientChatWidget from './components/chat/ClientChatWidget'
 import { useWebRTCCall } from './hooks/useWebRTCCall'
 import type { IncomingCallData } from './hooks/useWebRTCCall'
+
+// New Functional Modules
+import FamilyMedicineCabinet from './pages/FamilyMedicineCabinet'
+import AuthenticityCheck from './pages/AuthenticityCheck'
+import MyOrders from './pages/MyOrders'
+import DoctorAppointment from './pages/DoctorAppointment'
+import HealthCheck from './pages/HealthCheck'
+import PharmacyPartner from './pages/PharmacyPartner'
+import EventPage from './pages/EventPage'
 
 const SOCKET_URL = (() => {
   const explicitSocketUrl = import.meta.env.VITE_SOCKET_URL?.replace(/\/$/, '')
@@ -40,7 +50,22 @@ const isConsultPagePath = () => /^\/mua-thuoc-tu-van\/?$/.test(window.location.p
 const isCartPagePath = () => /^\/gio-hang\/?$/.test(window.location.pathname)
 const isCheckoutPagePath = () => /^\/thanh-toan\/?$/.test(window.location.pathname)
 const isMomoResultPagePath = () => /^\/checkout\/momo-return\/?$/.test(window.location.pathname)
+const isVnpayResultPagePath = () => /^\/checkout\/vnpay-return\/?$/.test(window.location.pathname)
 const isProfilePagePath = () => /^\/profile\/?$/.test(window.location.pathname)
+
+// 7 New Functional Module Paths
+const isFamilyMedicinePath = () => /^\/tu-thuoc-gia-dinh\/?$/.test(window.location.pathname)
+const isAuthenticityCheckPath = () => /^\/tra-cuu-chinh-hang\/?$/.test(window.location.pathname)
+const isMyOrdersPath = () => /^\/don-hang\/?$/.test(window.location.pathname)
+const isDoctorAppointmentPath = () => /^\/dat-lich-kham\/?$/.test(window.location.pathname)
+const isHealthCheckPath = () => /^\/kiem-tra-suc-khoe\/?$/.test(window.location.pathname)
+const isPharmacyPartnerPath = () => /^\/doi-tac-nha-thuoc\/?$/.test(window.location.pathname)
+const isEventPagePath = () => /^\/chuong-trinh\/[^/]+\/?$/.test(window.location.pathname)
+
+const getEventSlugFromPath = () => {
+  const match = window.location.pathname.match(/^\/chuong-trinh\/([^/]+)\/?$/)
+  return match ? match[1] : ''
+}
 
 const getHealthNewsIdFromPath = () => {
   const match = window.location.pathname.match(/^\/ban-tin-suc-khoe\/(1|2|3|4|5|6)$/)
@@ -54,8 +79,20 @@ function App() {
   const [isCartPage, setIsCartPage] = useState(isCartPagePath())
   const [isCheckoutPage, setIsCheckoutPage] = useState(isCheckoutPagePath())
   const [isMomoResultPage, setIsMomoResultPage] = useState(isMomoResultPagePath())
+  const [isVnpayResultPage, setIsVnpayResultPage] = useState(isVnpayResultPagePath())
   const [isProfilePage, setIsProfilePage] = useState(isProfilePagePath())
   const [activeHealthNewsId, setActiveHealthNewsId] = useState(getHealthNewsIdFromPath())
+
+  // New states for the 7 modules
+  const [isFamilyMedicinePage, setIsFamilyMedicinePage] = useState(isFamilyMedicinePath())
+  const [isAuthenticityCheckPage, setIsAuthenticityCheckPage] = useState(isAuthenticityCheckPath())
+  const [isMyOrdersPage, setIsMyOrdersPage] = useState(isMyOrdersPath())
+  const [isDoctorAppointmentPage, setIsDoctorAppointmentPage] = useState(isDoctorAppointmentPath())
+  const [isHealthCheckPage, setIsHealthCheckPage] = useState(isHealthCheckPath())
+  const [isPharmacyPartnerPage, setIsPharmacyPartnerPage] = useState(isPharmacyPartnerPath())
+
+  const [isEventPage, setIsEventPage] = useState(isEventPagePath())
+  const [activeEventSlug, setActiveEventSlug] = useState(getEventSlugFromPath())
 
   // ==================== CALL TARGET SELECTOR ====================
   const [showCallSelector, setShowCallSelector] = useState(false)
@@ -217,8 +254,20 @@ function App() {
     setIsCartPage(isCartPagePath())
     setIsCheckoutPage(isCheckoutPagePath())
     setIsMomoResultPage(isMomoResultPagePath())
+    setIsVnpayResultPage(isVnpayResultPagePath())
     setIsProfilePage(isProfilePagePath())
     setActiveHealthNewsId(getHealthNewsIdFromPath())
+
+    // Update new module states
+    setIsFamilyMedicinePage(isFamilyMedicinePath())
+    setIsAuthenticityCheckPage(isAuthenticityCheckPath())
+    setIsMyOrdersPage(isMyOrdersPath())
+    setIsDoctorAppointmentPage(isDoctorAppointmentPath())
+    setIsHealthCheckPage(isHealthCheckPath())
+    setIsPharmacyPartnerPage(isPharmacyPartnerPath())
+
+    setIsEventPage(isEventPagePath())
+    setActiveEventSlug(getEventSlugFromPath())
     }
 
     window.addEventListener('popstate', onPopState)
@@ -245,6 +294,8 @@ function App() {
     setIsConsultPage(false)
     setIsCartPage(false)
     setIsCheckoutPage(false)
+    setIsMomoResultPage(false)
+    setIsVnpayResultPage(false)
     setIsProfilePage(false)
     setActiveHealthNewsId('')
   }
@@ -258,6 +309,8 @@ function App() {
     setIsConsultPage(false)
     setIsCartPage(false)
     setIsCheckoutPage(false)
+    setIsMomoResultPage(false)
+    setIsVnpayResultPage(false)
     setIsProfilePage(false)
     setActiveHealthNewsId('')
   }
@@ -269,6 +322,8 @@ function App() {
     setIsConsultPage(true)
     setIsCartPage(false)
     setIsCheckoutPage(false)
+    setIsMomoResultPage(false)
+    setIsVnpayResultPage(false)
     setIsProfilePage(false)
     setActiveHealthNewsId('')
   }
@@ -281,6 +336,8 @@ function App() {
     setIsConsultPage(false)
     setIsCartPage(false)
     setIsCheckoutPage(false)
+    setIsMomoResultPage(false)
+    setIsVnpayResultPage(false)
     setIsProfilePage(false)
     setActiveHealthNewsId(newsId)
   }
@@ -292,6 +349,8 @@ function App() {
     setIsConsultPage(false)
     setIsCartPage(false)
     setIsCheckoutPage(false)
+    setIsMomoResultPage(false)
+    setIsVnpayResultPage(false)
     setIsProfilePage(false)
     setActiveHealthNewsId('')
   }
@@ -431,11 +490,93 @@ function App() {
     )
   }
 
+  if (isVnpayResultPage) {
+    return (
+      <>
+        {renderCallOverlays()}
+        <VnpayResultPage />
+        {renderSupportTools()}
+      </>
+    )
+  }
+
   if (isProfilePage) {
     return (
       <>
         {renderCallOverlays()}
         <ProfilePage onBackHome={backHome} />
+        {renderSupportTools()}
+      </>
+    )
+  }
+
+  // --- RENDERING NEW FUNCTIONAL MODULES ---
+
+  if (isFamilyMedicinePage) {
+    return (
+      <>
+        {renderCallOverlays()}
+        <FamilyMedicineCabinet />
+        {renderSupportTools()}
+      </>
+    )
+  }
+
+  if (isAuthenticityCheckPage) {
+    return (
+      <>
+        {renderCallOverlays()}
+        <AuthenticityCheck />
+        {renderSupportTools()}
+      </>
+    )
+  }
+
+  if (isMyOrdersPage) {
+    return (
+      <>
+        {renderCallOverlays()}
+        <MyOrders />
+        {renderSupportTools()}
+      </>
+    )
+  }
+
+  if (isDoctorAppointmentPage) {
+    return (
+      <>
+        {renderCallOverlays()}
+        <DoctorAppointment />
+        {renderSupportTools()}
+      </>
+    )
+  }
+
+  if (isHealthCheckPage) {
+    return (
+      <>
+        {renderCallOverlays()}
+        <HealthCheck />
+        {renderSupportTools()}
+      </>
+    )
+  }
+
+  if (isPharmacyPartnerPage) {
+    return (
+      <>
+        {renderCallOverlays()}
+        <PharmacyPartner />
+        {renderSupportTools()}
+      </>
+    )
+  }
+
+  if (isEventPage) {
+    return (
+      <>
+        {renderCallOverlays()}
+        <EventPage slug={activeEventSlug} onOpenProductDetail={openProductDetail} />
         {renderSupportTools()}
       </>
     )

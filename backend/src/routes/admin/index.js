@@ -22,6 +22,7 @@ router.use('/auth', authRoutes)
 router.use(authenticateClientJwt)
 
 // Admin routes — authorization được xử lý trong từng route file
+router.use('/order', orderRoutes)
 router.use('/orders', orderRoutes)
 router.use('/products', productRoutes)
 router.use('/users', userRoutes)

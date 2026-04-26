@@ -32,45 +32,48 @@ const toFullAddress = (addressDoc) => {
 	return parts.join(', ')
 }
 
-const serializeOrder = (orderDoc) => ({
-	id: String(orderDoc._id),
-	orderCode: orderDoc.orderCode,
-	userId: String(orderDoc.userId),
-	status: orderDoc.status,
-	paymentMethod: orderDoc.paymentMethod,
-	paymentStatus: orderDoc.paymentStatus,
-	transactionId: orderDoc.transactionId || null,
-	paymentDate: orderDoc.paymentDate || null,
-	totalQuantity: orderDoc.totalQuantity,
-	totalAmount: orderDoc.totalAmount,
-	note: orderDoc.note || '',
-	adminNote: orderDoc.adminNote || '',
-	cancelReason: orderDoc.cancelReason || '',
-	placedAt: orderDoc.placedAt,
-	shippingAddress: {
-		addressId: String(orderDoc.shippingAddress.addressId),
-		label: orderDoc.shippingAddress.label || 'other',
-		recipientName: orderDoc.shippingAddress.recipientName,
-		phone: orderDoc.shippingAddress.phone,
-		provinceName: orderDoc.shippingAddress.provinceName,
-		districtName: orderDoc.shippingAddress.districtName,
-		wardName: orderDoc.shippingAddress.wardName,
-		street: orderDoc.shippingAddress.street,
-		note: orderDoc.shippingAddress.note || '',
-		fullAddress: orderDoc.shippingAddress.fullAddress,
-	},
-	items: (orderDoc.items || []).map((item) => ({
-		productId: String(item.productId),
-		medicineCode: item.medicineCode || '',
-		productName: item.productName,
-		productImage: item.productImage || '',
-		unitPrice: item.unitPrice,
-		quantity: item.quantity,
-		lineTotal: item.lineTotal,
-	})),
-	createdAt: orderDoc.createdAt,
-	updatedAt: orderDoc.updatedAt,
-})
+const serializeOrder = (orderDoc) => {
+	return {
+		id: String(orderDoc._id),
+		orderCode: orderDoc.orderCode,
+		userId: String(orderDoc.userId),
+		status: orderDoc.status,
+		paymentMethod: orderDoc.paymentMethod,
+		paymentStatus: orderDoc.paymentStatus,
+		bankTransferInfo: null,
+		transactionId: orderDoc.transactionId || null,
+		paymentDate: orderDoc.paymentDate || null,
+		totalQuantity: orderDoc.totalQuantity,
+		totalAmount: orderDoc.totalAmount,
+		note: orderDoc.note || '',
+		adminNote: orderDoc.adminNote || '',
+		cancelReason: orderDoc.cancelReason || '',
+		placedAt: orderDoc.placedAt,
+		shippingAddress: {
+			addressId: String(orderDoc.shippingAddress.addressId),
+			label: orderDoc.shippingAddress.label || 'other',
+			recipientName: orderDoc.shippingAddress.recipientName,
+			phone: orderDoc.shippingAddress.phone,
+			provinceName: orderDoc.shippingAddress.provinceName,
+			districtName: orderDoc.shippingAddress.districtName,
+			wardName: orderDoc.shippingAddress.wardName,
+			street: orderDoc.shippingAddress.street,
+			note: orderDoc.shippingAddress.note || '',
+			fullAddress: orderDoc.shippingAddress.fullAddress,
+		},
+		items: (orderDoc.items || []).map((item) => ({
+			productId: String(item.productId),
+			medicineCode: item.medicineCode || '',
+			productName: item.productName,
+			productImage: item.productImage || '',
+			unitPrice: item.unitPrice,
+			quantity: item.quantity,
+			lineTotal: item.lineTotal,
+		})),
+		createdAt: orderDoc.createdAt,
+		updatedAt: orderDoc.updatedAt,
+	}
+}
 
 const ensureValidObjectId = (value, fieldName) => {
 	if (!mongoose.Types.ObjectId.isValid(value)) {
@@ -79,6 +82,14 @@ const ensureValidObjectId = (value, fieldName) => {
 }
 
 const allowedPaymentMethods = new Set(['cod', 'bank_transfer', 'e_wallet', 'momo'])
+
+const getInitialPaymentStatus = (paymentMethod) => {
+	if (paymentMethod === 'bank_transfer') {
+		return 'pending'
+	}
+
+	return 'unpaid'
+}
 
 const normalizeSelectedProductIds = (selectedProductIds) => {
 	if (!Array.isArray(selectedProductIds) || selectedProductIds.length === 0) {
@@ -174,6 +185,7 @@ const checkoutFromCart = async (userId, { addressId, note, paymentMethod = 'cod'
 				totalQuantity,
 				totalAmount,
 				paymentMethod,
+				paymentStatus: getInitialPaymentStatus(paymentMethod),
 				note: normalizeText(note),
 			})
 			break
@@ -185,12 +197,15 @@ const checkoutFromCart = async (userId, { addressId, note, paymentMethod = 'cod'
 		}
 	}
 
-	if (shouldCheckoutSelectedItems) {
-		cart.items = cart.items.filter((item) => !selectedProductIdSet.has(String(item.productId)))
-	} else {
-		cart.items = []
+	// Clear items from cart only for COD. For online payments, items are kept until payment success.
+	if (paymentMethod === 'cod') {
+		if (shouldCheckoutSelectedItems) {
+			cart.items = cart.items.filter((item) => !selectedProductIdSet.has(String(item.productId)))
+		} else {
+			cart.items = []
+		}
+		await cart.save()
 	}
-	await cart.save()
 
 	return serializeOrder(orderDoc)
 }

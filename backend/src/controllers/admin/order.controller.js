@@ -56,8 +56,28 @@ const updateOrderStatus = async (req, res) => {
 	}
 }
 
+const updateOrderPaymentStatus = async (req, res) => {
+	try {
+		const { orderId } = req.params
+		const data = await orderService.updateOrderPaymentStatus(orderId, req.body || {})
+
+		return res.status(200).json({
+			success: true,
+			message: 'Order payment status updated successfully',
+			data,
+		})
+	} catch (error) {
+		return res.status(error.statusCode || 500).json({
+			success: false,
+			message: error.message || 'Update payment status failed',
+			error: error.message,
+		})
+	}
+}
+
 module.exports = {
 	listOrders,
 	getOrderDetail,
 	updateOrderStatus,
+	updateOrderPaymentStatus,
 }

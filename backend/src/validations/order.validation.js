@@ -15,10 +15,17 @@ const updateOrderStatusSchema = Joi.object({
 	adminNote: Joi.string().trim().max(1000).allow(''),
 }).min(1)
 
+const updateOrderPaymentStatusSchema = Joi.object({
+	paymentStatus: Joi.string().valid('pending', 'paid', 'failed').required(),
+	adminNote: Joi.string().trim().max(1000).allow(''),
+	cancelReason: Joi.string().trim().max(1000).allow(''),
+})
+
 const checkoutSchema = Joi.object({
 	addressId: Joi.string().required(),
 	paymentMethod: Joi.string().valid('cod', 'bank_transfer', 'e_wallet', 'momo').default('cod'),
 	note: Joi.string().trim().max(500).allow('').default(''),
+	selectedProductIds: Joi.array().items(Joi.string().trim().required()).default([]),
 })
 
-module.exports = { orderQuerySchema, updateOrderStatusSchema, checkoutSchema }
+module.exports = { orderQuerySchema, updateOrderStatusSchema, updateOrderPaymentStatusSchema, checkoutSchema }

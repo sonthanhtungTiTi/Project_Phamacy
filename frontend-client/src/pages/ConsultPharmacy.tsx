@@ -41,8 +41,8 @@ function ConsultPharmacy({ onBackHome }: ConsultPharmacyProps) {
 						</span>
 
 						<div className="flex-1">
-							<div className="mb-2 flex items-center gap-2">
-								<h2 className="text-4xl font-extrabold text-slate-900">Nhà Thuốc T&Q</h2>
+								<div className="mb-2 flex items-center gap-2">
+									<h2 className="text-4xl font-extrabold text-slate-900">Nhà Thuốc T&Q</h2>
 								<span className="inline-grid h-7 w-7 place-items-center rounded-full bg-gradient-to-b from-[#ffda15] to-[#c69b01] text-white">
 									✓
 								</span>

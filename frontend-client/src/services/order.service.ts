@@ -26,6 +26,12 @@ export interface OrderData {
 	status: 'pending' | 'confirmed' | 'shipping' | 'completed' | 'cancelled'
 	paymentMethod: PaymentMethod
 	paymentStatus: 'unpaid' | 'pending' | 'paid' | 'failed' | 'refunded'
+	bankTransferInfo?: {
+		bankName: string
+		accountNumber: string
+		accountHolder: string
+		transferContent: string
+	} | null
 	transactionId?: string | null
 	paymentDate?: string | null
 	totalQuantity: number

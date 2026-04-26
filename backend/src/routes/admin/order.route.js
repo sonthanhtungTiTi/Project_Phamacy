@@ -4,7 +4,11 @@ const orderController = require('../../controllers/admin/order.controller')
 const { authorize } = require('../../middleware/authorize.middleware')
 const { validate } = require('../../middleware/validate')
 const { ROLE_GROUPS } = require('../../constants/roles')
-const { orderQuerySchema, updateOrderStatusSchema } = require('../../validations/order.validation')
+const {
+	orderQuerySchema,
+	updateOrderStatusSchema,
+	updateOrderPaymentStatusSchema,
+} = require('../../validations/order.validation')
 
 const router = express.Router()
 
@@ -21,6 +25,12 @@ router.get('/:orderId', orderController.getOrderDetail)
 router.patch('/:orderId/status',
 	validate(updateOrderStatusSchema),
 	orderController.updateOrderStatus,
+)
+
+// PATCH /api/admin/orders/:orderId/payment-status — Cập nhật trạng thái thanh toán
+router.patch('/:orderId/payment-status',
+	validate(updateOrderPaymentStatusSchema),
+	orderController.updateOrderPaymentStatus,
 )
 
 module.exports = router

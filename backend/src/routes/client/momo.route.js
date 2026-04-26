@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { createMomoPayment, handleMomoCallback } = require('../../services/client/momo.service');
 const Order = require('../../models/order.model');
+const Cart = require('../../models/cart.model');
 const { authenticateClientJwt } = require('../../middleware/auth.middleware');
 
 const parseMomoExtraData = (value) => {
@@ -136,6 +137,22 @@ router.post('/callback', async (req, res) => {
           paymentDate: new Date(),
         }
       );
+
+      // Clear items from user's cart after successful payment
+      try {
+        const order = await Order.findById(targetOrderId);
+        if (order) {
+          const cart = await Cart.findOne({ userId: order.userId });
+          if (cart) {
+            const orderProductIds = order.items.map((item) => String(item.productId));
+            cart.items = cart.items.filter((item) => !orderProductIds.includes(String(item.productId)));
+            await cart.save();
+          }
+        }
+      } catch (cartError) {
+        console.error('Failed to clear cart after Momo success:', cartError.message);
+      }
+
       console.log(`✅ MoMo success for order ${targetOrderId}, awaiting admin confirmation`);
     } else {
       // Thất bại → hủy đơn tự động

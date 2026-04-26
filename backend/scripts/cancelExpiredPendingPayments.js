@@ -17,6 +17,7 @@ async function cancelExpiredPendingPayments() {
         placedAt: { $lt: thirtyMinAgo }
       },
       {
+        paymentStatus: 'failed',
         status: 'cancelled',
         cancelReason: 'Hết hạn chờ thanh toán (30 phút)'
       }

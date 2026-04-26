@@ -51,7 +51,7 @@ const getPaymentStatusLabel = (status: OrderData['paymentStatus']) => {
 
 const getPaymentMethodLabel = (method: OrderData['paymentMethod']) => {
 	if (method === 'cod') return 'Thanh toán khi nhận hàng'
-	if (method === 'bank_transfer') return 'Chuyển khoản ngân hàng'
+	if (method === 'bank_transfer') return 'Thanh toán VNPay'
 	if (method === 'e_wallet') return 'Ví điện tử'
 	if (method === 'momo') return 'MoMo'
 	return method

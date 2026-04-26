@@ -5,6 +5,7 @@ import { useCart } from '../hooks/useCart'
 import { checkoutFromCart } from '../services/order.service'
 import { MomoPaymentError, createMomoPayment } from '../services/momo.service'
 import type { PaymentMethod } from '../services/order.service'
+import { VnpayPaymentError, createVnpayPayment } from '../services/vnpay.service'
 
 interface CheckoutPageProps {
 	onBackToCart?: () => void
@@ -12,6 +13,8 @@ interface CheckoutPageProps {
 }
 
 const CHECKOUT_SELECTED_IDS_KEY = 'checkout:selectedProductIds'
+
+
 
 const paymentMethodOptions: Array<{ value: PaymentMethod; label: string; description: string }> = [
 	{
@@ -21,8 +24,8 @@ const paymentMethodOptions: Array<{ value: PaymentMethod; label: string; descrip
 	},
 	{
 		value: 'bank_transfer',
-		label: 'Chuyển khoản ngân hàng',
-		description: 'Đặt hàng trước, thanh toán qua tài khoản ngân hàng.',
+		label: 'Thanh toán VNPay',
+		description: 'Thanh toán trực tuyến qua cổng VNPay (ATM, QR, thẻ nội địa).',
 	},
 	{
 		value: 'e_wallet',
@@ -114,9 +117,11 @@ function CheckoutPage({ onBackToCart, onBackHome }: CheckoutPageProps) {
 	const canSubmit = Boolean(selectedCheckoutAddress?.id) && isSelectionValid && !isSubmitting
 	const submitButtonLabel = isSubmitting
 		? 'Dang xu ly...'
-		: paymentMethod === 'momo'
-			? 'Thanh toan bang QR MoMo'
-			: 'Xac nhan dat hang'
+		: paymentMethod === 'bank_transfer'
+			? 'Thanh toan qua VNPay'
+			: paymentMethod === 'momo'
+				? 'Thanh toan bang QR MoMo'
+				: 'Xac nhan dat hang'
 
 	const handleBackToCart = () => {
 		if (onBackToCart) {
@@ -185,6 +190,38 @@ function CheckoutPage({ onBackToCart, onBackHome }: CheckoutPageProps) {
 					const normalizedMomoMessage = momoMessage.trim().replace(/[.\s]+$/g, '')
 					setSubmitError(
 						`${normalizedMomoMessage}. Đơn hàng ${order.orderCode} đã được tạo, vui lòng thử lại thanh toán Momo.`
+					)
+					return
+				}
+			}
+
+			if (paymentMethod === 'bank_transfer') {
+				try {
+					sessionStorage.setItem('vnpayOrderId', order.id)
+
+					const vnpayResponse = await createVnpayPayment({
+						orderId: order.id,
+					})
+
+					if (vnpayResponse.success && vnpayResponse.payUrl) {
+						sessionStorage.removeItem(CHECKOUT_SELECTED_IDS_KEY)
+						window.location.href = vnpayResponse.payUrl
+						return
+					}
+
+					throw new Error('Khong nhan duoc link thanh toan VNPAY')
+				} catch (vnpayError) {
+					console.error('VNPay redirect error:', vnpayError)
+					const vnpayMessage =
+						vnpayError instanceof VnpayPaymentError
+							? vnpayError.message
+							: vnpayError instanceof Error
+								? vnpayError.message
+								: 'Khong tao duoc lien ket thanh toan VNPAY'
+
+					const normalizedVnpayMessage = vnpayMessage.trim().replace(/[.\s]+$/g, '')
+					setSubmitError(
+						`${normalizedVnpayMessage}. Don hang ${order.orderCode} da duoc tao, vui long thu lai thanh toan VNPAY.`
 					)
 					return
 				}
@@ -365,6 +402,15 @@ function CheckoutPage({ onBackToCart, onBackHome }: CheckoutPageProps) {
 								)
 							})}
 						</div>
+
+						{paymentMethod === 'bank_transfer' && (
+							<div className="mt-3 rounded-lg border border-[#bfdbfe] bg-[#eff6ff] p-3 text-sm text-slate-700">
+								<p className="font-semibold text-slate-800">Thanh toán qua cổng VNPay</p>
+								<p className="mt-1 text-xs text-slate-600">
+									Sau khi xác nhận, hệ thống sẽ chuyển bạn đến VNPay để chọn ngân hàng và hoàn tất thanh toán an toàn.
+								</p>
+							</div>
+						)}
 
 						<textarea
 							value={note}
